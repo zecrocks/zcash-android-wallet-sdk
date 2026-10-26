@@ -7,35 +7,65 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- NU7 support. The native library now builds against the NU7 librustzcash release line
+- NU7 support. The native library is built against the NU7 librustzcash release line
   (`zcash_protocol` 0.11, `zcash_client_backend` 0.25, `zcash_client_sqlite` 0.23, `orchard`
-  0.16), which knows the NU7 consensus branch ID `0x77190AD9` and the mainnet activation height
-  3543405. Wallets must be on this release before that height to keep creating valid
-  transactions. No API changes for the send, shield, or PCZT paths.
+  0.16), which knows the NU7 consensus branch ID `0x77190AD9` and its activation heights
+  (mainnet 3543405, testnet 4465026). Wallets must be on this release before NU7 activates to
+  keep creating valid transactions. The send, shield and PCZT APIs are unchanged.
+- `ZcashNetwork.nu7ActivationHeight` (`null` for a network id the SDK does not recognize) and
+  `ZcashNetwork.isNu7ActiveAt(height)`.
+- `ZcashSdk.blockIntervalMillis(network, height)`, with `ZcashSdk.PRE_NU7_BLOCK_INTERVAL_MILLIS`
+  (75 000) and `ZcashSdk.POST_NU7_BLOCK_INTERVAL_MILLIS` (25 000): the target block spacing at a
+  given height. Use it for any block-count-to-time conversion.
+- `ZcashSdk.defaultTxExpiryDelta(network, targetHeight)`, with
+  `ZcashSdk.PRE_NU7_DEFAULT_TX_EXPIRY_DELTA` (40) and `ZcashSdk.POST_NU7_DEFAULT_TX_EXPIRY_DELTA`
+  (120): the number of blocks after its target height at which a transaction the SDK creates
+  expires.
+- `ConsensusBranchId` gains `NU5`, `NU6`, `NU6_1`, `NU6_2`, `NU6_3` and `NU7`. An exhaustive
+  `when` over `ConsensusBranchId` stops compiling until these cases are handled.
 
 ### Changed
-- **Shielded voting is disabled.** The native library no longer contains the shielded-voting
-  entry points, because `zcash_voting` has no stable release on the NU7 librustzcash line. The
-  Kotlin voting API (`VotingSdk`, `VotingRustBackend` and the `sdk-lib` wrapper around it) is
-  still present in this build, but every call into it now fails at runtime with
-  `UnsatisfiedLinkError`. Hide or remove voting UI before adopting this release.
+- **Maven coordinates.** Artifacts are now published under the group `rocks.zec.android`
+  instead of `cash.z.ecc.android`, starting at version 5.0.0. Change dependency declarations
+  from, for example, `cash.z.ecc.android:zcash-android-sdk` to
+  `rocks.zec.android:zcash-android-sdk` (likewise for `zcash-android-backend`,
+  `lightwallet-client` and `zcash-android-sdk-incubator`), and update any repository
+  `includeGroup` filters. Kotlin package names (`cash.z.ecc.android.sdk`, ...) are unchanged, so
+  no import changes are needed.
+- **Shielded voting removed (temporarily).** `zcash_voting` has no release compatible with the
+  NU7 librustzcash line, so the voting API is removed from this release: `VotingSdk` and its
+  `cash.z.ecc.android.sdk.model.voting` models, `VotingRustBackend` and its `Jni*` voting
+  models and constants, and `Synchronizer.getWalletDbPathForVoting()`. Code using any of these
+  stops compiling; remove or hide voting features before adopting this release. Voting is
+  expected to return once a compatible `zcash_voting` is released.
+- `ZcashSdk.BLOCK_INTERVAL_MILLIS` is deprecated: it is the pre-NU7 75-second spacing and is wrong
+  for blocks from NU7 activation onward. Replace it with
+  `ZcashSdk.blockIntervalMillis(network, height)`.
+- `ZcashSdk.EXPIRY_OFFSET` (20) is deprecated: it has not matched the expiry the SDK applies since
+  Blossom. Replace it with `ZcashSdk.defaultTxExpiryDelta(network, targetHeight)`.
 - Transactions created from NU7 activation onward expire 120 blocks after their target height
   by default, instead of 40 blocks; at NU7's 25-second block target that is the same ~50
   minutes that 40 blocks were at 75 seconds. Code that derives a deadline or "expired" state
-  from a fixed block count should be updated. The wallet likewise assumes a 120-block
-  expiry for a transaction whose expiry height it does not know, so such a transaction stays
-  pending for more blocks after NU7.
+  from a fixed block count should be updated. The wallet likewise assumes a 120-block expiry
+  for a transaction whose expiry height it does not know, so such a transaction stays pending
+  for more blocks after NU7.
 - Proposing or creating a payment to a ZIP 316 Revision 2 unified address that has expired,
   or whose expiry the transaction's expiry height would exceed, now fails instead of building
   the transaction.
 - Unified addresses and viewing keys that ZIP 316 Revision 0 cannot represent (for example a
-  transparent-only UFVK) are encoded at Revision 2, so
-  account UFVK/UIVK strings returned by the SDK can carry Revision 2 prefixes.
+  transparent-only UFVK) are encoded at Revision 2, so account UFVK/UIVK strings returned by
+  the SDK can carry Revision 2 prefixes.
 
 ### Fixed
-- After NU7 activation, the Orchard migration's `estimatedDurationHours` and the wallet's
-  ephemeral-address recheck window and backoff use the 25-second NU7 block target instead of
-  assuming 75-second blocks.
+- `Synchronizer.validateConsensusBranch()` reported both branches as unknown on any chain past
+  Canopy, because `ConsensusBranchId` had no entry for NU5 or later. It now resolves NU5 through
+  NU7, so the returned `ConsensusMatchType` can detect a real mismatch.
+- After NU7 activation, `OrchardMigrationSdk.estimatedChainTip()` and
+  `estimatedSecondsPerBlock()` use the 25-second NU7 block target: the tip extrapolation
+  switches spacing when it crosses activation, the measured rate is not skewed by pre-NU7
+  blocks in its window, and the fallback when too few blocks are scanned follows the height.
+  The Orchard migration's `estimatedDurationHours` and the wallet's ephemeral-address recheck
+  window and backoff likewise use the NU7 target instead of assuming 75-second blocks.
 
 ## [4.0.1] - 2026-10-20
 

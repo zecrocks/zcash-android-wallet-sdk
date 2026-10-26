@@ -3,6 +3,40 @@ Troubleshooting Migrations
 
 Note: Going forward, migrations will be incorporated into the CHANGELOG.md.
 
+Migration to Version 5.0.0 from 4.0.x
+---------------------------------
+5.0.0 is the first release maintained by Zec.rocks and the first with NU7 support. Upgrade
+before NU7 activates (mainnet height 3543405); see `CHANGELOG.md` for the full list.
+
+1. **Maven group.** Change every SDK dependency from `cash.z.ecc.android` to
+   `rocks.zec.android`, keeping the artifact id:
+   ```kotlin
+   // Before
+   implementation("cash.z.ecc.android:zcash-android-sdk:4.0.1")
+   // After
+   implementation("rocks.zec.android:zcash-android-sdk:5.0.0")
+   ```
+   Do the same for `zcash-android-backend`, `lightwallet-client` and
+   `zcash-android-sdk-incubator`, and for any `includeGroup("cash.z.ecc.android")` repository
+   filter that is meant to match the SDK. Kotlin packages are unchanged, so imports stay as
+   they are. Other `cash.z.ecc.android` artifacts that are not part of this SDK, such as
+   `kotlin-bip39`, keep their own coordinates.
+2. **Shielded voting.** `VotingSdk`, the `cash.z.ecc.android.sdk.model.voting` models,
+   `VotingRustBackend` and `Synchronizer.getWalletDbPathForVoting()` are removed until a
+   `zcash_voting` release compatible with NU7 exists. Remove or feature-flag voting code paths.
+   Test fakes implementing `Synchronizer` must drop their `getWalletDbPathForVoting()` override.
+3. **Block time.** NU7 lowers the target block spacing from 75 s to 25 s. Replace
+   `ZcashSdk.BLOCK_INTERVAL_MILLIS` with `ZcashSdk.blockIntervalMillis(network, height)`, and
+   review any other code that converts between block counts and wall-clock time (progress
+   estimates, "about N minutes" labels, confirmation-time hints): after NU7 a block count
+   represents a third of the time it used to.
+4. **Expiry.** Transactions targeting NU7 or later expire 120 blocks after their target height
+   rather than 40 (the same ~50 minutes). Replace `ZcashSdk.EXPIRY_OFFSET`, which never matched
+   the applied expiry, with `ZcashSdk.defaultTxExpiryDelta(network, targetHeight)`, or better,
+   read the transaction's own expiry height.
+5. **Consensus branches.** `ConsensusBranchId` gains `NU5` through `NU7`; exhaustive `when`
+   expressions over it need the new cases.
+
 Migration to Version 1.11
 ---------------------------------
 The way the SDK is initialized has changed.  The `Initializer` object has been removed and `Synchronizer.new` now takes a longer parameter list which includes the parameters previously passed to `Initializer`.
