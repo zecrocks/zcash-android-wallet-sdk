@@ -81,7 +81,8 @@ class BranchIdTest internal constructor(
                     )
                 }
             return listOf(
-                // Mainnet Cases
+                // Mainnet Cases. The NU6.3/NU7 cases also check that ZcashNetwork's Kotlin copy
+                // of the NU7 activation height agrees with the native consensus parameters.
                 arrayOf(
                     "Sapling",
                     BlockHeight.new(419_200L),
@@ -108,6 +109,20 @@ class BranchIdTest internal constructor(
                     BlockHeight.new(1_046_400L),
                     3925833126L,
                     "e9ff75a6",
+                    mainnetBackend
+                ),
+                arrayOf(
+                    "NU6.3",
+                    ZcashNetwork.Mainnet.nu7ActivationHeight!! - 1,
+                    933566043L,
+                    "37a5165b",
+                    mainnetBackend
+                ),
+                arrayOf(
+                    "NU7",
+                    ZcashNetwork.Mainnet.nu7ActivationHeight!!,
+                    1998129881L,
+                    "77190ad9",
                     mainnetBackend
                 ),
                 // Testnet Cases
@@ -137,6 +152,20 @@ class BranchIdTest internal constructor(
                     BlockHeight.new(1_028_500L),
                     3925833126L,
                     "e9ff75a6",
+                    testnetBackend
+                ),
+                arrayOf(
+                    "NU6.3",
+                    ZcashNetwork.Testnet.nu7ActivationHeight!! - 1,
+                    933566043L,
+                    "37a5165b",
+                    testnetBackend
+                ),
+                arrayOf(
+                    "NU7",
+                    ZcashNetwork.Testnet.nu7ActivationHeight!!,
+                    1998129881L,
+                    "77190ad9",
                     testnetBackend
                 )
             )
