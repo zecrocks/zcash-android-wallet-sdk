@@ -31,6 +31,7 @@
 //!    caller-echoed primitives is impossible anyway: the new engine's plan types have no public
 //!    constructor — verified directly, not assumed.)
 
+use crate::utils::OsRng;
 use anyhow::anyhow;
 use jni::{
     JNIEnv,
@@ -41,7 +42,6 @@ use jni::{
     },
 };
 use prost::Message;
-use rand::rngs::OsRng;
 use rusqlite::Connection;
 use std::num::NonZeroUsize;
 use std::ptr;
@@ -53,7 +53,7 @@ use zcash_client_sqlite::AccountUuid;
 use zcash_client_sqlite::util::SystemClock;
 use zcash_primitives::transaction::fees::{FeeRule, zip317::MARGINAL_FEE};
 use zcash_protocol::consensus::{
-    BLOCKS_PER_HOUR, BlockHeight, Network, NetworkConstants, Parameters,
+    BlockHeight, Network, NetworkConstants, Parameters, target_time_between,
 };
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::{PoolType, ShieldedPool};
@@ -69,6 +69,7 @@ use zcash_pool_migration::{
     satisfiability::{
         AdvanceConfig, DuenessTargets, ReorgSettleDepth, ReplanThreshold, advance_migration,
     },
+    scheduling::BlockSpacing,
     signing_rounds::RunSigningCapacity,
     state::{AdvanceStep, NextAction, StepKind},
 };
@@ -801,6 +802,7 @@ fn encode_transfer_proposal<'a>(
 
 fn encode_migration_schedule<'a>(
     env: &mut JNIEnv<'a>,
+    network: &Network,
     plan: &MigrationPlan,
     tip: BlockHeight,
     plan_handle: crate::migration_plan_cache::PlanHandle,
@@ -912,18 +914,17 @@ fn encode_migration_schedule<'a>(
     )?;
 
     // Estimated duration: span from the earliest to the latest scheduled broadcast height, in
-    // hours (75s/block, matching `zcash_protocol::SECONDS_PER_BLOCK`/`BLOCKS_PER_HOUR`).
+    // whole hours of target block time. The target spacing depends on the height (75 s before NU7
+    // activation, 25 s from it), so the span is converted with `target_time_between`.
     let estimated_duration_hours = schedule
         .iter()
-        .map(|e| u32::from(e.broadcast_height()))
+        .map(|e| e.broadcast_height())
         .max()
-        .zip(
-            schedule
-                .iter()
-                .map(|e| u32::from(e.broadcast_height()))
-                .min(),
-        )
-        .map(|(max, min)| max.saturating_sub(min) / BLOCKS_PER_HOUR)
+        .zip(schedule.iter().map(|e| e.broadcast_height()).min())
+        .map(|(max, min)| {
+            jint::try_from(target_time_between(network, min, max).as_secs() / 3600)
+                .unwrap_or(jint::MAX)
+        })
         .unwrap_or(0);
 
     // Constructor parameter order matches the Kotlin field declaration order in JniMigrationSchedule:
@@ -935,7 +936,7 @@ fn encode_migration_schedule<'a>(
         &[
             JValue::Object(&transfers),
             JValue::Object(&preparations),
-            JValue::Int(estimated_duration_hours as jint),
+            JValue::Int(estimated_duration_hours),
             JValue::Long(plan_handle as i64),
         ],
     )?)
@@ -971,7 +972,14 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
 ) -> jobject {
     let res = catch_unwind(&mut env, |env| {
         let (migration_plan, tip, plan_handle) = plan(env, db_data, network_id, account_uuid)?;
-        Ok(encode_migration_schedule(env, &migration_plan, tip, plan_handle)?.into_raw())
+        Ok(encode_migration_schedule(
+            env,
+            &crate::parse_network(network_id as u32)?,
+            &migration_plan,
+            tip,
+            plan_handle,
+        )?
+        .into_raw())
     });
     unwrap_exc_or(&mut env, res, ptr::null_mut())
 }
@@ -1006,7 +1014,14 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
             .chain_height()
             .map_err(|e| anyhow!("chain height lookup failed: {}", e))?
             .ok_or_else(|| anyhow!("wallet has no chain tip yet"))?;
-        Ok(encode_migration_schedule(env, &migration_plan, tip, plan_handle)?.into_raw())
+        Ok(encode_migration_schedule(
+            env,
+            &crate::parse_network(network_id as u32)?,
+            &migration_plan,
+            tip,
+            plan_handle,
+        )?
+        .into_raw())
     });
     unwrap_exc_or(&mut env, res, ptr::null_mut())
 }
@@ -1152,7 +1167,7 @@ fn try_prove(
     // Scoped so the prover's mutable borrow of the wallet ends before the store below takes a
     // shared one.
     let result = {
-        let mut prover = WalletMigrationProver::new(wallet, account, fvk);
+        let mut prover = WalletMigrationProver::new(wallet, OsRng, account, fvk);
         match anchor {
             None => engine::prove_transfer(&params, &mut prover, state, id, scanned_tip, &mut rng),
             Some(anchor) => engine::prove_preparation(&mut prover, state, id, anchor),
@@ -1282,7 +1297,7 @@ fn finalize_note_split(
     let extracted = pczt::roles::tx_extractor::TransactionExtractor::new(
         pczt::Pczt::parse(&bytes).map_err(|e| anyhow!("parse proven note-split pczt: {:?}", e))?,
     )
-    .extract()
+    .extract(OsRng)
     .map_err(|e| anyhow!("extract proven note-split tx: {:?}", e))?;
     let txid: [u8; 32] = *extracted.txid().as_ref();
     Ok((bytes, txid))
@@ -1389,7 +1404,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
         let pczt =
             pczt::Pczt::parse(&pczt_bytes).map_err(|e| anyhow!("Error parsing PCZT: {:?}", e))?;
         let tx = pczt::roles::tx_extractor::TransactionExtractor::new(pczt)
-            .extract()
+            .extract(OsRng)
             .map_err(|e| anyhow!("Error extracting transaction: {:?}", e))?;
         let mut raw = Vec::new();
         tx.write(&mut raw)
@@ -1587,7 +1602,7 @@ fn read_reconciled(
 fn pczt_txid(bytes: &[u8]) -> Option<[u8; 32]> {
     let parsed = pczt::Pczt::parse(bytes).ok()?;
     let extracted = pczt::roles::tx_extractor::TransactionExtractor::new(parsed)
-        .extract()
+        .extract(OsRng)
         .ok()?;
     Some(*extracted.txid().as_ref())
 }
@@ -1912,6 +1927,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
 fn any_overdue(
     backend: &mut impl PoolMigrationWrite<Error = EngineError>,
     state: &mut MigrationState,
+    spacing: BlockSpacing,
     scanned_tip: BlockHeight,
     effective_tip: BlockHeight,
 ) -> anyhow::Result<bool> {
@@ -1921,7 +1937,7 @@ fn any_overdue(
     let scanned_target = scanned_tip + 1;
     let estimated_target = std::cmp::max(scanned_target, effective_tip + 1);
     let (code, _id, _next_height, _next_kind) =
-        advance_step(backend, state, scanned_target, estimated_target)?;
+        advance_step(backend, state, spacing, scanned_target, estimated_target)?;
     Ok(code == STEP_BROADCAST)
 }
 
@@ -1937,7 +1953,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
     estimated_tip: jlong,
 ) -> jboolean {
     let res = catch_unwind(&mut env, |env| {
-        let (_network, wallet, mut store_conn) = open(env, db_data, network_id)?;
+        let (network, wallet, mut store_conn) = open(env, db_data, network_id)?;
         let account = crate::account_id_from_jni(env, account_uuid)?;
         let scanned_tip = target_height(&wallet)? - 1;
         let effective_tip = if estimated_tip >= 0 {
@@ -1949,7 +1965,13 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
         let persisted = read_reconciled(&wallet, &mut backend)?;
         Ok(match persisted {
             Some(mut state) => {
-                if any_overdue(&mut backend, &mut state, scanned_tip, effective_tip)? {
+                if any_overdue(
+                    &mut backend,
+                    &mut state,
+                    BlockSpacing::for_network(&network),
+                    scanned_tip,
+                    effective_tip,
+                )? {
                     JNI_TRUE
                 } else {
                     JNI_FALSE
@@ -2464,6 +2486,7 @@ enum DueTransferResult<'a> {
 fn next_due_transfer_result<'a>(
     backend: &mut impl PoolMigrationWrite<Error = EngineError>,
     state: &'a mut MigrationState,
+    spacing: BlockSpacing,
     scanned_tip: BlockHeight,
     effective_tip: BlockHeight,
 ) -> anyhow::Result<DueTransferResult<'a>> {
@@ -2476,7 +2499,7 @@ fn next_due_transfer_result<'a>(
     let scanned_target = scanned_tip + 1;
     let estimated_target = std::cmp::max(scanned_target, effective_tip + 1);
     let (code, id, _next_height, _next_kind) =
-        advance_step(backend, state, scanned_target, estimated_target)?;
+        advance_step(backend, state, spacing, scanned_target, estimated_target)?;
     Ok(match code {
         STEP_BROADCAST => {
             let tx_id = MigrationTransferId::new(id as u32);
@@ -2548,7 +2571,13 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
                 .collect::<Vec<_>>(),
         );
 
-        match next_due_transfer_result(&mut backend, &mut state, scanned_tip, effective_tip)? {
+        match next_due_transfer_result(
+            &mut backend,
+            &mut state,
+            BlockSpacing::for_network(wallet.params()),
+            scanned_tip,
+            effective_tip,
+        )? {
             DueTransferResult::NothingDue => Ok(env
                 .new_object(
                     JNI_DUE_TRANSFER_RESULT,
@@ -2589,7 +2618,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
                     pczt::Pczt::parse(bytes)
                         .map_err(|e| anyhow!("parse proven transfer pczt: {:?}", e))?,
                 )
-                .extract()
+                .extract(OsRng)
                 .map_err(|e| anyhow!("extract proven transfer tx: {:?}", e))?;
                 let txid: [u8; 32] = *extracted.txid().as_ref();
                 let txid_obj = crate::utils::rust_bytes_to_java(env, &txid)?;
@@ -3132,7 +3161,14 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
 ) -> jobject {
     let res = catch_unwind(&mut env, |env| {
         let (migration_plan, tip, plan_handle) = plan(env, db_data, network_id, account_uuid)?;
-        Ok(encode_migration_schedule(env, &migration_plan, tip, plan_handle)?.into_raw())
+        Ok(encode_migration_schedule(
+            env,
+            &crate::parse_network(network_id as u32)?,
+            &migration_plan,
+            tip,
+            plan_handle,
+        )?
+        .into_raw())
     });
     unwrap_exc_or(&mut env, res, ptr::null_mut())
 }
@@ -4290,7 +4326,7 @@ mod live_wallet_signing_tests {
         let ask = orchard::keys::SpendAuthorizingKey::from(usk.orchard());
         let unsigned_pczt =
             pczt::Pczt::parse(&unsigned_split_bytes).expect("parse unsigned split pczt");
-        let signed_pczt = zcash_pool_migration::build::sign_pczt(unsigned_pczt, &ask)
+        let signed_pczt = zcash_pool_migration::build::sign_pczt(OsRng, unsigned_pczt, &ask)
             .expect("sign split pczt out-of-process");
         let signed_bytes = signed_pczt
             .serialize()
@@ -4312,7 +4348,7 @@ mod live_wallet_signing_tests {
         // `OrchardParse(MissingAnchor)` on the un-finalized bytes.
         let parsed = pczt::Pczt::parse(&proven_pczt).expect("parse proven split pczt");
         let tx = pczt::roles::tx_extractor::TransactionExtractor::new(parsed)
-            .extract()
+            .extract(OsRng)
             .expect("extract broadcast tx from finalized split pczt");
         assert_eq!(
             *tx.txid().as_ref(),
@@ -5092,7 +5128,7 @@ mod next_due_transfer_tests {
             state: state.clone(),
             as_of: scanned,
         };
-        next_due_transfer_result(&mut store, state, scanned, effective)
+        next_due_transfer_result(&mut store, state, BlockSpacing::UNIFORM, scanned, effective)
             .expect("in-memory store never errors")
     }
 
@@ -5226,7 +5262,8 @@ mod next_due_transfer_tests {
             as_of: tip,
         };
         assert!(
-            any_overdue(&mut store, &mut state, tip, tip).expect("in-memory store never errors"),
+            any_overdue(&mut store, &mut state, BlockSpacing::UNIFORM, tip, tip)
+                .expect("in-memory store never errors"),
             "a due Proved preparation must count as overdue (sync gate must close)"
         );
 
@@ -5392,7 +5429,10 @@ mod next_due_transfer_tests {
             &mut store,
             &mut st,
             DuenessTargets::new(scanned, BlockHeight::from_u32(estimated)),
-            &AdvanceConfig::new(SETTLE_DEPTH),
+            &AdvanceConfig::new(
+                ReorgSettleDepth::new(SETTLE_DEPTH_REFERENCE_BLOCKS),
+                BlockSpacing::UNIFORM,
+            ),
             &mut OsRng,
         )
         .expect("in-memory store never errors");
@@ -5691,7 +5731,10 @@ mod advance_step_peek_tests {
             &mut store_a,
             &mut state_a,
             targets,
-            &AdvanceConfig::new(SETTLE_DEPTH),
+            &AdvanceConfig::new(
+                ReorgSettleDepth::new(SETTLE_DEPTH_REFERENCE_BLOCKS),
+                BlockSpacing::UNIFORM,
+            ),
             &mut OsRng,
         )
         .expect("in-memory store never errors");
@@ -5710,9 +5753,14 @@ mod advance_step_peek_tests {
             as_of: tip,
         };
         let mut state_b = state.clone();
-        let (_code, _id, next_height, next_kind) =
-            advance_step(&mut store_b, &mut state_b, tip + 1, tip + 1)
-                .expect("advance_step over the in-memory store");
+        let (_code, _id, next_height, next_kind) = advance_step(
+            &mut store_b,
+            &mut state_b,
+            BlockSpacing::UNIFORM,
+            tip + 1,
+            tip + 1,
+        )
+        .expect("advance_step over the in-memory store");
 
         let (expected_height, expected_kind) = expected_next.expect("checked above");
         assert_eq!(
@@ -5756,7 +5804,7 @@ mod advance_step_peek_tests {
         };
         let mut st = state.clone();
         let (code, _id, next_height, next_kind) =
-            advance_step(&mut store, &mut st, tip + 1, tip + 1)
+            advance_step(&mut store, &mut st, BlockSpacing::UNIFORM, tip + 1, tip + 1)
                 .expect("advance_step over the in-memory store");
         assert_eq!(code, STEP_COMPLETE);
         assert_eq!(next_height, -1);
@@ -6858,7 +6906,7 @@ mod state_machine_trace_tests {
         satisfiability::{
             AdvanceConfig, DuenessTargets, ReorgSettleDepth, ReplanThreshold, advance_migration,
         },
-        scheduling::{AnchorBucketInterval, WakeupParams},
+        scheduling::{AnchorBucketInterval, BlockSpacing, WakeupParams},
         state::{AdvanceStep, Blocker},
     };
     use zcash_protocol::consensus::BlockHeight;
@@ -7026,7 +7074,7 @@ mod state_machine_trace_tests {
                 &mut store,
                 &mut state,
                 DuenessTargets::at(target),
-                &AdvanceConfig::new(ReorgSettleDepth::new(10)),
+                &AdvanceConfig::new(ReorgSettleDepth::new(10), BlockSpacing::UNIFORM),
                 &mut rng(),
             )
             .expect("advance_migration over the no-op store")
@@ -7532,7 +7580,7 @@ mod state_machine_trace_tests {
             &mut store,
             &mut state,
             DuenessTargets::at(BlockHeight::from_u32(1_001)),
-            &AdvanceConfig::new(ReorgSettleDepth::new(10)),
+            &AdvanceConfig::new(ReorgSettleDepth::new(10), BlockSpacing::UNIFORM),
             &mut rng(),
         )
         .expect("advance_migration over the no-op store")
@@ -7589,10 +7637,18 @@ mod state_machine_trace_tests {
 
 /// How far the chain must advance past a divergence before a displacement counts as PERMANENT —
 /// caller policy that `zcash_pool_migration` deliberately does not default, since the right value
-/// tracks block spacing. Ten blocks is ~12 minutes at the 75-second target. A depth judged too
-/// aggressively self-corrects: the marks it produces are cleared by reorg truncation if the chain
-/// swings back.
-const SETTLE_DEPTH: ReorgSettleDepth = ReorgSettleDepth::new(10);
+/// tracks block spacing. Expressed in ZIP 318 reference blocks (75-second blocks): ten is ~12
+/// minutes. A depth judged too aggressively self-corrects: the marks it produces are cleared by
+/// reorg truncation if the chain swings back.
+const SETTLE_DEPTH_REFERENCE_BLOCKS: u32 = 10;
+
+/// [`SETTLE_DEPTH_REFERENCE_BLOCKS`] as a depth in blocks at `height`: the same ~12 minutes spans
+/// `NU7_POW_TARGET_SPACING_RATIO` times as many blocks once NU7's 25-second spacing is active.
+fn settle_depth(spacing: &BlockSpacing, height: BlockHeight) -> ReorgSettleDepth {
+    ReorgSettleDepth::new(
+        SETTLE_DEPTH_REFERENCE_BLOCKS.saturating_mul(spacing.blocks_per_reference_block(height)),
+    )
+}
 
 const STEP_WAITING: i64 = 0;
 const STEP_PROVE: i64 = 1;
@@ -7652,11 +7708,12 @@ const BLOCKER_UNSATISFIABLE: i32 = 9;
 fn advance_step(
     backend: &mut impl PoolMigrationWrite<Error = EngineError>,
     state: &mut MigrationState,
+    spacing: BlockSpacing,
     scanned_target: BlockHeight,
     estimated_target: BlockHeight,
 ) -> anyhow::Result<(i64, i64, i64, i64)> {
     let targets = DuenessTargets::new(scanned_target, estimated_target);
-    let config = AdvanceConfig::new(SETTLE_DEPTH);
+    let config = AdvanceConfig::new(settle_depth(&spacing, scanned_target), spacing);
     let mut rng = OsRng;
     let advance = advance_migration(backend, state, targets, &config, &mut rng)
         .map_err(|e| anyhow!("Error advancing migration: {:?}", e))?;
@@ -7719,7 +7776,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
     estimated_tip: jlong,
 ) -> jobject {
     let res = catch_unwind(&mut env, |env| {
-        let (_network, wallet, mut store_conn) = open(env, db_data, network_id)?;
+        let (network, wallet, mut store_conn) = open(env, db_data, network_id)?;
         let account = crate::account_id_from_jni(env, account_uuid)?;
         let scanned = target_height(&wallet)?; // scanned tip + 1
         // estimated_tip < 0 → unavailable → no acceleration (estimated == scanned).
@@ -7735,8 +7792,13 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_MigrationRustBackend_
         else {
             return Ok(ptr::null_mut());
         };
-        let (code, id, next_height, next_kind) =
-            advance_step(&mut backend, &mut state, scanned, estimated)?;
+        let (code, id, next_height, next_kind) = advance_step(
+            &mut backend,
+            &mut state,
+            BlockSpacing::for_network(&network),
+            scanned,
+            estimated,
+        )?;
         let arr = env.new_long_array(4)?;
         env.set_long_array_region(&arr, 0, &[code, id, next_height, next_kind])?;
         Ok(arr.into_raw())

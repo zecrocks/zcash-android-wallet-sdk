@@ -17,28 +17,29 @@ default = []
 # Enables JNI helpers that are only used by Android instrumentation tests.
 # This feature must not be enabled for production native builds.
 android-test-fixtures = []
+# Shielded voting JNI bindings (`src/main/rust/voting/`). Off by default and does not
+# currently build: its dependencies are commented out (see the `zcash_voting` comment
+# below), and enabling it is a deliberate `compile_error!`. CI therefore lists features
+# explicitly instead of passing `--all-features`.
+voting = []
 
 [dependencies]
 # Zcash dependencies
 
-# Ironwood (NU6.3): resolves from crates.io — the published 0.15.4 carries the ZIP 374 support
-# the old git pin provided, so no orchard [patch] entry is needed.
+# NU7: the librustzcash family below resolves from crates.io (zcash_protocol 0.11 is the first
+# release carrying the NU7 consensus branch ID), so no [patch.crates-io] entry is needed.
 #
-# `unstable-voting-circuits` is not requested here, but it IS enabled in the built graph:
-# re-enabling shielded voting brings it back transitively, because `zcash_voting` and its
-# `voting-circuits` dependency both ask orchard for it (`cargo tree -i voting-circuits` shows
-# the single path). Cargo features are additive, so naming it here would change nothing; the
-# way to keep the share-reveal circuit out of the shipped library is to drop voting itself,
-# not to drop this feature.
-orchard = "0.15"
-zcash_pool_migration = { version = "0.1.0", features = ["wallet"] }
+# `unstable-voting-circuits` is not requested, and with the `voting` feature off (the default)
+# nothing else enables it, so the share-reveal circuit is not in the shipped library.
+orchard = "0.16"
+zcash_pool_migration = { version = "0.2.0", features = ["wallet"] }
 # `signer` is this branch's addition, for the Keystone batch-signing recipe below
 # (`pczt::roles::signer::batch`).
-pczt = { version = "0.9.0", features = ["prover", "orchard", "sapling", "signer"] }
-sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
-transparent = { package = "zcash_transparent", version = "0.10", default-features = false }
-zcash_address = "0.13"
-zcash_client_backend = { version = "0.24.0", features = [
+pczt = { version = "0.10.0", features = ["prover", "orchard", "sapling", "signer"] }
+sapling = { package = "sapling-crypto", version = "0.9", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.11", default-features = false }
+zcash_address = "0.14"
+zcash_client_backend = { version = "0.25.0", features = [
     "orchard",
     "lightwalletd-tonic-tls-webpki-roots",
     "tor",
@@ -46,25 +47,25 @@ zcash_client_backend = { version = "0.24.0", features = [
     "unstable",
     "pczt",
 ] }
-zcash_client_sqlite = { version = "0.22.0", features = ["orchard", "transparent-inputs", "unstable", "serde"] }
-zcash_note_encryption = "0.4.1"
-zcash_primitives = "0.30"
-zcash_proofs = "0.30"
-zcash_protocol = "0.10"
-zcash_script = "0.4"
-zip32 = "0.2"
+zcash_client_sqlite = { version = "0.23.0", features = ["orchard", "transparent-inputs", "unstable", "serde"] }
+zcash_note_encryption = "0.5.1"
+zcash_primitives = "0.31"
+zcash_proofs = "0.31"
+zcash_protocol = "0.11"
+zcash_script = "0.6"
+zip32 = "0.3"
 eip681 = "0.1.0"
 # Used by migration_finalize.rs to read `ShardTreeError`/`QueryError` variants when checking
 # note-witness availability at a migration transaction's anchor boundary.
-shardtree = "0.7"
-# Used by voting/notes.rs to construct historical Orchard witness positions.
-incrementalmerkletree = { version = "0.8", default-features = false }
+shardtree = "0.8"
+# Used by migration_engine.rs (note positions) and the voting module.
+incrementalmerkletree = { version = "0.9", default-features = false }
 
 # Infrastructure
 prost = "0.14"
 rusqlite = "0.37"
 secrecy = "0.8"
-rand = "0.8"
+rand = "0.10"
 nonempty = "0.11"
 
 # HTTP
@@ -98,55 +99,35 @@ dlopen2 = "0.8"
 libc = "0.2"
 
 # Tor
-fs-mistrust = "0.12"
-tor-rtcompat = "0.35"
+fs-mistrust = "0.14"
+tor-rtcompat = "0.43"
 rust_decimal = { version = "1", default-features = false, features = ["c-repr"] }
 # - The "static" feature is required for the "compression" default feature of arti-client.
 xz2 = { version = "0.1", features = ["static"] }
 
-# Shielded voting
+# Shielded voting (disabled)
 #
 # `zcash_voting` provides client-side primitives for shielded voting. The Android JNI
-# boundary is `src/main/rust/voting.rs`.
+# boundary is `src/main/rust/voting.rs`, compiled only with the `voting` feature.
 #
-# Kept enabled here after the maint/v3.0.x cascade merge (see PR #2183, which disabled
-# voting only on that maintenance line, not on main).
+# Voting is disabled from 5.0.0 (NU7): `zcash_voting` has no stable release built against
+# the NU7 librustzcash family (zcash_protocol 0.11 / zcash_client_backend 0.25 / orchard
+# 0.16). The release this module was written against (3.0.0-rc.3) pins the previous family,
+# and Cargo cannot resolve it even as an optional dependency (`bip32 =0.6.0-pre.1` via
+# zcash_transparent 0.10 conflicts with `bip32 ^0.6` via zcash_client_backend 0.25), so the
+# dependencies are commented out rather than made optional.
 #
-# 2.0.0-rc.3 resolves from crates.io, with no `[patch.crates-io]` entry. Earlier releases
-# (0.11, 1.0) pinned the pre-Ironwood librustzcash family, which cargo resolved alongside
-# this crate's Ironwood family and duplicated eight Zcash crates in the native library
-# (issue #2056); that is what the git patch existed to avoid. The published 2.0.0-rc.3
-# pins the Ironwood family directly, so each Zcash crate resolves exactly once without one.
+# To re-enable: uncomment these three, pointing `zcash_voting` at a permissively licensed
+# release built against the current librustzcash family; add them to the `voting` feature
+# (`voting = ["dep:zcash_voting", "dep:pasta_curves", "dep:ff"]`); port
+# `src/main/rust/voting/` to that release and drop the `compile_error!` in `voting.rs`.
+#zcash_voting = { version = "=3.0.0-rc.3", optional = true }
 #
-# The transitive `voting-circuits` dependency contains the share-reveal circuit
-# and the Poseidon-based `share_nullifier_hash` implementation:
-# https://github.com/valargroup/voting-circuits/blob/v0.8.0/voting-circuits/src/share_reveal/circuit.rs
-#
-# To re-enable: uncomment these three, add `unstable-voting-circuits` back to the
-# orchard dependency above, and build with `--cfg zcash_voting`. The 2.0 sources this
-# tree is written against are a published crates.io release, so no `[patch.crates-io]`
-# entry is needed. `incrementalmerkletree` above stays uncommented either way -- the
-# migration engine uses it too.
-#
-# 2.0.0-rc.5 (adopted 2026-08-11, see #2161) is the first published release with the
-# `tx1_effects` field delegate-vote submissions need — the vote-chain server rejects the
-# legacy `sighash`-only shape with "invalid message field: tx1 effects must be 821 bytes,
-# got 0". Earlier rc.4 only had this fix via an unpublished git pin (see the removed
-# `[patch.crates-io]` entry below); rc.5 ships it on crates.io directly.
-#
-# 3.0.0-rc.3 (adopted for MOB-1678, see #2406) tracks Valargroup's v1.3.0 vote-chain
-# generation: the PIR dataset moves to poly_len 4096 and round attestations become
-# auth-v2-signed. It stays pinned exactly (not a `^`/default caret range) to match the
-# same rev iOS (swift-sdk PR #1972) and Vizor build against; it still resolves against
-# this crate's Ironwood family, so no `[patch.crates-io]` entry is needed here either.
-zcash_voting = { version = "=3.0.0-rc.3" }
-
 # The delegation-submission signing recipe (voting/delegation.rs) derives the account
 # SpendAuth key locally and needs the same Pallas scalar/field types zcash_voting and
-# orchard already carry transitively; pin to the versions already resolved for them
-# (see Cargo.lock) so this stays the same crate instance, not a second copy.
-pasta_curves = { version = "0.5" }
-ff = { version = "0.13" }
+# orchard already carry transitively. Only used by the `voting` module.
+#pasta_curves = { version = "0.5", optional = true }
+#ff = { version = "0.13", optional = true }
 
 # Keystone hardware-wallet batch signing for the Orchard migration flow.
 #
@@ -178,7 +159,7 @@ bip0039 = "0.12"
 # transaction through `zcash_client_sqlite`'s internal pool-migration truncation wiring. Cargo
 # unions this feature set with the `[dependencies]` entry above only for test/bench/example
 # builds, so the release library never links tempfile/rand_chacha/ambassador.
-zcash_client_sqlite = { version = "0.22.0", features = ["orchard", "transparent-inputs", "unstable", "serde", "test-dependencies"] }
+zcash_client_sqlite = { version = "0.23.0", features = ["orchard", "transparent-inputs", "unstable", "serde", "test-dependencies"] }
 
 [lib]
 name = "zcashwalletsdk"
@@ -189,10 +170,6 @@ crate-type = ["staticlib", "cdylib"]
 [workspace]
 
 [patch.crates-io]
-# `zcash_voting` is deliberately absent (removed 2026-08-11, see #2161): now that
-# 2.0.0-rc.5 ships the `tx1_effects` fix on crates.io directly (see the dependency entry
-# above), the unpublished git pin this patch used to carry is no longer needed.
-
 # DO NOT ALTER THIS COMMENT
 #
 # This section is left in place to ensure that development against in-progress

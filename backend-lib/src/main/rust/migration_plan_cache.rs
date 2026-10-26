@@ -25,8 +25,8 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use rand::RngCore;
-use rand::rngs::OsRng;
+use crate::utils::OsRng;
+use rand::Rng;
 use zcash_client_sqlite::AccountUuid;
 use zcash_pool_migration::engine::MigrationPlan;
 

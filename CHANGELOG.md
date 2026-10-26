@@ -6,6 +6,37 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- NU7 support. The native library now builds against the NU7 librustzcash release line
+  (`zcash_protocol` 0.11, `zcash_client_backend` 0.25, `zcash_client_sqlite` 0.23, `orchard`
+  0.16), which knows the NU7 consensus branch ID `0x77190AD9` and the mainnet activation height
+  3543405. Wallets must be on this release before that height to keep creating valid
+  transactions. No API changes for the send, shield, or PCZT paths.
+
+### Changed
+- **Shielded voting is disabled.** The native library no longer contains the shielded-voting
+  entry points, because `zcash_voting` has no stable release on the NU7 librustzcash line. The
+  Kotlin voting API (`VotingSdk`, `VotingRustBackend` and the `sdk-lib` wrapper around it) is
+  still present in this build, but every call into it now fails at runtime with
+  `UnsatisfiedLinkError`. Hide or remove voting UI before adopting this release.
+- Transactions created from NU7 activation onward expire 120 blocks after their target height
+  by default, instead of 40 blocks; at NU7's 25-second block target that is the same ~50
+  minutes that 40 blocks were at 75 seconds. Code that derives a deadline or "expired" state
+  from a fixed block count should be updated. The wallet likewise assumes a 120-block
+  expiry for a transaction whose expiry height it does not know, so such a transaction stays
+  pending for more blocks after NU7.
+- Proposing or creating a payment to a ZIP 316 Revision 2 unified address that has expired,
+  or whose expiry the transaction's expiry height would exceed, now fails instead of building
+  the transaction.
+- Unified addresses and viewing keys that ZIP 316 Revision 0 cannot represent (for example a
+  transparent-only UFVK) are encoded at Revision 2, so
+  account UFVK/UIVK strings returned by the SDK can carry Revision 2 prefixes.
+
+### Fixed
+- After NU7 activation, the Orchard migration's `estimatedDurationHours` and the wallet's
+  ephemeral-address recheck window and backoff use the 25-second NU7 block target instead of
+  assuming 75-second blocks.
+
 ## [4.0.1] - 2026-10-20
 
 ### Fixed

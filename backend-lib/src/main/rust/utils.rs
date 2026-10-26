@@ -15,6 +15,40 @@ pub(crate) mod exception;
 pub(crate) mod target_ndk;
 pub(crate) mod trace;
 
+/// The operating system's cryptographically secure RNG.
+///
+/// `rand 0.10` replaced `rand::rngs::OsRng` with the fallible [`rand::rngs::SysRng`]. The
+/// librustzcash APIs take an infallible `Rng + CryptoRng`; the `pczt 0.10` CHANGELOG
+/// recommends `rand_core::UnwrapErr(rand::rngs::SysRng)` to keep the previous behaviour.
+/// This is that adapter as a stateless unit struct, so it can still be named as both a type
+/// and a value (`OsRng`, `&mut OsRng`) the way `rand::rngs::OsRng` was. Like `OsRng` and
+/// `UnwrapErr`, it panics if the operating system's RNG fails.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct OsRng;
+
+impl rand::TryRng for OsRng {
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(rand::Rng::next_u32(&mut rand::rand_core::UnwrapErr(
+            rand::rngs::SysRng,
+        )))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(rand::Rng::next_u64(&mut rand::rand_core::UnwrapErr(
+            rand::rngs::SysRng,
+        )))
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        rand::Rng::fill_bytes(&mut rand::rand_core::UnwrapErr(rand::rngs::SysRng), dst);
+        Ok(())
+    }
+}
+
+impl rand::TryCryptoRng for OsRng {}
+
 /// Invokes a closure, capturing the cause of an unwinding panic if one occurs.
 ///
 /// This asserts that `&mut JNIEnv` is unwind-safe. See [this issue] for context.

@@ -245,9 +245,11 @@ jobs:
         run: |
           make test-rust
 
-  # --all-features matters: code behind a cargo feature (for example the
+  # The feature list matters: code behind a cargo feature (for example the
   # android-test-fixtures gate the Android build enables) is invisible to a
   # default-feature check, so a merge can break it while `cargo check` stays green.
+  # make lint-rust enables every feature except `voting` (RUST_CHECK_FEATURES in
+  # the Makefile), which does not build until zcash_voting is ported.
   # --tests extends the same coverage to test-only code.
   static_analysis_clippy:
     needs: validate_gradle_wrapper

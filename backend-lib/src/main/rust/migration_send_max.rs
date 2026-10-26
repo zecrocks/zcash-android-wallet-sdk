@@ -11,8 +11,8 @@
 //! than an ordinary transfer: the caller cannot compute the right amount
 //! themselves, because the fee depends on which inputs the selector picks.
 
+use crate::utils::OsRng;
 use anyhow::anyhow;
-use rand::rngs::OsRng;
 use zcash_address::{ToAddress, ZcashAddress, unified, unified::Encoding as _};
 use zcash_client_backend::{
     data_api::{
@@ -99,9 +99,12 @@ pub(crate) fn propose_orchard_to_ironwood(
     let receiver = orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
     let recipient = ZcashAddress::from_unified(
         network.network_type(),
-        unified::Address::try_from_items(vec![unified::Receiver::Orchard(
-            receiver.to_raw_address_bytes(),
-        )])
+        unified::Address::try_from_items(
+            unified::Revision::R0,
+            vec![unified::Uitem::Data(unified::Receiver::Orchard(
+                receiver.to_raw_address_bytes(),
+            ))],
+        )
         .map_err(|e| anyhow!("Unable to construct the migration recipient: {}", e))?,
     );
 
