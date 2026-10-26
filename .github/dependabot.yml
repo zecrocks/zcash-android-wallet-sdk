@@ -13,3 +13,33 @@ updates:
       interval: "daily"
     cooldown:
       default-days: 7
+
+  - package-ecosystem: "cargo"
+    directory: "/backend-lib"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      # The librustzcash family must move together; network upgrades land as a coordinated release.
+      librustzcash:
+        patterns:
+          - "zcash_*"
+          - "orchard"
+          - "sapling-crypto"
+          - "pczt"
+          - "zip32"
+          - "zip321"
+          - "shardtree"
+          - "incrementalmerkletree"
+          - "equihash"
+          - "f4jumble"
+
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10

@@ -1,16 +1,18 @@
 [![license](https://img.shields.io/github/license/zecrocks/zcash-android-wallet-sdk.svg?maxAge=2592000&style=plastic)](https://github.com/zecrocks/zcash-android-wallet-sdk/blob/main/LICENSE)
 ![Maven Central](https://img.shields.io/maven-central/v/rocks.zec.android/zcash-android-sdk?color=success&style=plastic)
 
-# End of Support
-Version 4.0.0 is the final release of the Zcash Android Wallet SDK. Support for this
-SDK will end when [NU7 activates](https://zips.z.cash/zip-0259), currently expected
-in November 2026\.
+# Maintained by Zec.rocks
+This is the continuation of the MIT-licensed Zcash Android Wallet SDK, maintained by
+[Zec.rocks](https://zec.rocks) after Zcash Open Development Lab (formerly the Electric Coin Company)
+[ended support](https://forum.zcashcommunity.com/t/zcash-android-and-swift-sdks-end-of-support-and-next-steps/58441)
+following the 4.0.x releases.
 
-Development will continue in the [ZODL Android Wallet SDK](https://github.com/zodl-inc/zodl-android-wallet-sdk), alongside [ZODL Slipstream](https://github.com/zodl-inc/slipstream).
-These projects are available under the GNU Affero General Public License (AGPLv3),
-with separate commercial licensing options for developers whose needs require different terms.
-
-We thank the Zcash community for seven years of support, contributions, and collaboration.
+* Version 5.0.0 adds support for [NU7](https://zips.z.cash/zip-0259). Earlier versions cannot
+  create valid transactions after NU7 activates.
+* Releases are published to Maven Central under the group `rocks.zec.android` (previously
+  `cash.z.ecc.android`). Kotlin package names are unchanged. See [MIGRATIONS.md](MIGRATIONS.md).
+* The SDK remains under the [MIT License](LICENSE). This repository does not incorporate code
+  from AGPL-licensed successor projects.
 
 # Zcash Android SDK
 This lightweight SDK connects Android to Zcash, allowing third-party Android apps to send and receive shielded transactions easily, securely and privately.
