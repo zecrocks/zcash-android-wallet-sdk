@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 /**
  * JNI bridge to the `zcash_pool_migration` crate.
  *
- * Unlike [VotingRustBackend], this holds no handle/registry state: `MigrationContext::new` is
+ * This holds no handle/registry state: `MigrationContext::new` is
  * cheap and every Rust-side call opens its own connection internally, so every method here is a
  * self-contained call keyed by [dbDataPath]/[networkId]/[accountUuidBytes].
  */

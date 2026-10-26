@@ -765,8 +765,6 @@ interface Synchronizer {
      */
     suspend fun getTreeState(height: BlockHeight): ByteArray
 
-    suspend fun getWalletDbPathForVoting(): String
-
     //
     // Error Handling
     //
