@@ -1,5 +1,5 @@
-[![license](https://img.shields.io/github/license/zcash/zcash-android-wallet-sdk.svg?maxAge=2592000&style=plastic)](https://github.com/zcash/zcash-android-wallet-sdk/blob/master/LICENSE)
-![Maven Central](https://img.shields.io/maven-central/v/cash.z.ecc.android/zcash-android-sdk?color=success&style=plastic)
+[![license](https://img.shields.io/github/license/zecrocks/zcash-android-wallet-sdk.svg?maxAge=2592000&style=plastic)](https://github.com/zecrocks/zcash-android-wallet-sdk/blob/main/LICENSE)
+![Maven Central](https://img.shields.io/maven-central/v/rocks.zec.android/zcash-android-sdk?color=success&style=plastic)
 
 # End of Support
 Version 4.0.0 is the final release of the Zcash Android Wallet SDK. Support for this

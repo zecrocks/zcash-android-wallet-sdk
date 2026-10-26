@@ -9,7 +9,9 @@ val publicationVariant = "release"
 val isSnapshot = project.property("IS_SNAPSHOT").toString().toBoolean()
 val myVersion = project.property("LIBRARY_VERSION").toString()
 
-val myGroup = "cash.z.ecc.android"
+// Zec.rocks publishes under its own namespace; `cash.z.ecc.android` belongs to the previous
+// maintainer. Kotlin package names are unchanged.
+val myGroup = "rocks.zec.android"
 project.group = myGroup
 
 plugins.apply(MavenPublishPlugin::class.java)
@@ -34,24 +36,24 @@ extensions.getByType<MavenPublishBaseExtension>().apply {
             "This lightweight SDK connects Android to Zcash, allowing third-party " +
                 "Android apps to send and receive shielded transactions easily, securely and privately."
         )
-        url.set("https://github.com/zcash/zcash-android-wallet-sdk/")
+        url.set("https://github.com/zecrocks/zcash-android-wallet-sdk/")
         inceptionYear.set("2018")
         scm {
-            url.set("https://github.com/zcash/zcash-android-wallet-sdk/")
-            connection.set("scm:git:git://github.com/zcash/zcash-android-wallet-sdk.git")
-            developerConnection.set("scm:git:ssh://git@github.com/zcash/zcash-android-wallet-sdk.git")
+            url.set("https://github.com/zecrocks/zcash-android-wallet-sdk/")
+            connection.set("scm:git:git://github.com/zecrocks/zcash-android-wallet-sdk.git")
+            developerConnection.set("scm:git:ssh://git@github.com/zecrocks/zcash-android-wallet-sdk.git")
         }
         developers {
             developer {
-                id.set("zcash")
-                name.set("Zcash Open Development Lab")
-                url.set("https://github.com/zcash/")
+                id.set("zecrocks")
+                name.set("Zec.rocks")
+                url.set("https://github.com/zecrocks/")
             }
         }
         licenses {
             license {
                 name.set("MIT License")
-                url.set("https://github.com/zcash/zcash-android-wallet-sdk/blob/main/LICENSE")
+                url.set("https://github.com/zecrocks/zcash-android-wallet-sdk/blob/main/LICENSE")
                 distribution.set("repo")
             }
         }
