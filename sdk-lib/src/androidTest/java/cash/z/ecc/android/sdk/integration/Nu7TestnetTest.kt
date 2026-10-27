@@ -58,7 +58,7 @@ import kotlin.time.Duration.Companion.seconds
  * `nu7Seed` (a BIP 39 mnemonic whose words may be separated by `_`, `,` or `+`, since the
  * runner arguments cannot carry spaces) or `nu7SeedHex` (the hex-encoded BIP 39 entropy).
  *
- * Optional arguments: `nu7SyncTimeoutMinutes` (default 90) and `nu7MineTimeoutMinutes`
+ * Optional arguments: `nu7Birthday` (default 4460000), `nu7SyncTimeoutMinutes` (default 90) and `nu7MineTimeoutMinutes`
  * (default 10).
  *
  * Every wallet address and the key heights and branch IDs are logged under the logcat tag
@@ -268,7 +268,7 @@ class Nu7TestnetTest : ScopedTest() {
         private const val HEX_RADIX = 16
 
         // Before NU7 activation, so the scan crosses the upgrade boundary.
-        private const val BIRTHDAY = 4_460_000L
+        private const val DEFAULT_BIRTHDAY = 4_460_000L
         private const val SYNC_MARGIN = 10L
         private val MIN_SPENDABLE = Zatoshi(50_000)
         private val SEND_AMOUNT = Zatoshi(10_000)
@@ -282,6 +282,9 @@ class Nu7TestnetTest : ScopedTest() {
         private val args = InstrumentationRegistry.getArguments()
 
         private val isEnabled = args.getString("nu7Testnet").toBoolean()
+
+        // Optional `nu7Birthday` restores from an older height to exercise long historic scans.
+        private val birthday = args.getString("nu7Birthday")?.toLongOrNull() ?: DEFAULT_BIRTHDAY
         private val syncTimeout = minutesArg("nu7SyncTimeoutMinutes", 90)
         private val mineTimeout = minutesArg("nu7MineTimeoutMinutes", 10)
 
@@ -336,12 +339,12 @@ class Nu7TestnetTest : ScopedTest() {
             lock.withLock {
                 closeable ?: run {
                     val checkpoint =
-                        CheckpointTool.loadNearest(appContext, ZcashNetwork.Testnet, BlockHeight.new(BIRTHDAY))
-                    log("creating wallet alias=$alias birthday=$BIRTHDAY nearestCheckpoint=${checkpoint.height}")
+                        CheckpointTool.loadNearest(appContext, ZcashNetwork.Testnet, BlockHeight.new(birthday))
+                    log("creating wallet alias=$alias birthday=$birthday nearestCheckpoint=${checkpoint.height}")
                     Synchronizer
                         .new(
                             alias = alias,
-                            birthday = BlockHeight.new(BIRTHDAY),
+                            birthday = BlockHeight.new(birthday),
                             context = appContext,
                             lightWalletEndpoint = ENDPOINT,
                             setup = AccountCreateSetup("NU7 test", null, FirstClassByteArray(seed)),
