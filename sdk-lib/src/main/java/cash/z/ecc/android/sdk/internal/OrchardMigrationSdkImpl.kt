@@ -99,8 +99,8 @@ import kotlin.time.Duration.Companion.seconds
  *
  * Deliberately independent of [cash.z.ecc.android.sdk.Synchronizer]: a host-level sync gate needs
  * [isSyncBlocked] *before* any `Synchronizer` exists — a `Synchronizer`-scoped factory would be
- * circular. Every method here instead resolves the wallet's db path (via [DatabaseCoordinator], the
- * same helper `getWalletDbPathForVoting()` uses) lazily, per call, independent of any `Synchronizer`.
+ * circular. Every method here instead resolves the wallet's db path (via [DatabaseCoordinator])
+ * lazily, per call, independent of any `Synchronizer`.
  *
  * The interface itself has no account parameter on any method, so it already assumes one bound
  * account per instance — [account] is that bound account, resolved by the caller from whichever

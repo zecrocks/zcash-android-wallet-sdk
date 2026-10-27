@@ -1,6 +1,8 @@
 package cash.z.ecc.android.sdk.ext
 
+import cash.z.ecc.android.sdk.model.BlockHeight
 import cash.z.ecc.android.sdk.model.Zatoshi
+import cash.z.ecc.android.sdk.model.ZcashNetwork
 
 /**
  * Wrapper for all the constant values in the SDK. It is important that these values stay fixed for
@@ -29,10 +31,44 @@ object ZcashSdk {
     const val MAX_MEMO_SIZE = 512
 
     /**
-     * The amount of blocks ahead of the current height where new transactions are set to expire. This value is
-     * controlled by the rust backend but it is helpful to know what it is set to and should be kept in sync.
+     * The pre-Blossom default expiry delta. The native library has not used this value since
+     * Blossom; see [defaultTxExpiryDelta].
      */
+    @Deprecated(
+        message =
+            "The default expiry delta is 40 blocks before NU7 and 120 blocks from NU7 onward. " +
+                "Use defaultTxExpiryDelta(network, targetHeight).",
+        replaceWith = ReplaceWith("ZcashSdk.defaultTxExpiryDelta(network, targetHeight)")
+    )
     const val EXPIRY_OFFSET = 20
+
+    /**
+     * Default number of blocks after the target height at which a transaction created by the
+     * SDK expires, for transactions targeting a height before NU7 activation (ZIP 203).
+     */
+    const val PRE_NU7_DEFAULT_TX_EXPIRY_DELTA = 40
+
+    /**
+     * Default number of blocks after the target height at which a transaction created by the
+     * SDK expires, for transactions targeting NU7 activation or later (ZIP 218). At the 25-second
+     * NU7 block target this is the same ~50 minutes as [PRE_NU7_DEFAULT_TX_EXPIRY_DELTA].
+     */
+    const val POST_NU7_DEFAULT_TX_EXPIRY_DELTA = 120
+
+    /**
+     * The default expiry delta, in blocks, the native library applies to a transaction whose
+     * target height is [targetHeight] on [network]. The value is chosen by librustzcash; this
+     * mirrors it for display and scheduling purposes.
+     */
+    fun defaultTxExpiryDelta(
+        network: ZcashNetwork,
+        targetHeight: BlockHeight
+    ): Int =
+        if (network.isNu7ActiveAt(targetHeight)) {
+            POST_NU7_DEFAULT_TX_EXPIRY_DELTA
+        } else {
+            PRE_NU7_DEFAULT_TX_EXPIRY_DELTA
+        }
 
     /**
      * A short amount of time, in milliseconds, to poll for new blocks used typically when a block synchronization error
@@ -41,15 +77,47 @@ object ZcashSdk {
     const val POLL_INTERVAL_SHORT = 5_000L
 
     /**
-     * Default amount of time, in milliseconds, to poll for new blocks. Typically, this should be about half the average
-     * block time.
+     * Default amount of time, in milliseconds, to poll for new blocks. It stays below the 25-second NU7 target block
+     * spacing, so a new block is normally noticed within one poll both before and after NU7.
      */
     const val POLL_INTERVAL = 20_000L
 
     /**
-     * Estimate of the time between blocks.
+     * Estimate of the time between blocks before NU7.
      */
+    @Deprecated(
+        message =
+            "NU7 lowers the target block spacing from 75 to 25 seconds, so no single constant is " +
+                "correct. Use blockIntervalMillis(network, height).",
+        replaceWith = ReplaceWith("ZcashSdk.blockIntervalMillis(network, height)")
+    )
     const val BLOCK_INTERVAL_MILLIS = 75_000L
+
+    /**
+     * Target time between blocks, in milliseconds, from Blossom until NU7 activation.
+     */
+    const val PRE_NU7_BLOCK_INTERVAL_MILLIS = 75_000L
+
+    /**
+     * Target time between blocks, in milliseconds, from NU7 activation onward.
+     */
+    const val POST_NU7_BLOCK_INTERVAL_MILLIS = 25_000L
+
+    /**
+     * Target time between blocks, in milliseconds, for a block mined at [height] on [network]:
+     * [POST_NU7_BLOCK_INTERVAL_MILLIS] once NU7 is active at [height], otherwise
+     * [PRE_NU7_BLOCK_INTERVAL_MILLIS]. This is the protocol target, not a measurement; actual
+     * spacing varies, especially on testnet.
+     */
+    fun blockIntervalMillis(
+        network: ZcashNetwork,
+        height: BlockHeight
+    ): Long =
+        if (network.isNu7ActiveAt(height)) {
+            POST_NU7_BLOCK_INTERVAL_MILLIS
+        } else {
+            PRE_NU7_BLOCK_INTERVAL_MILLIS
+        }
 
     /**
      * The default maximum amount of time to wait during retry backoff intervals. Failed loops will never wait longer

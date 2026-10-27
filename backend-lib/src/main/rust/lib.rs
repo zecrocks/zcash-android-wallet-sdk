@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::ptr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::utils::OsRng;
 use anyhow::{Context, anyhow};
 use bitflags::bitflags;
 use bytes::Bytes;
@@ -18,7 +19,6 @@ use jni::{
 };
 use nonempty::NonEmpty;
 use prost::Message;
-use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretVec};
 use tor_rtcompat::ToplevelBlockOn;
 use tracing::{debug, error};
@@ -92,7 +92,7 @@ use zcash_protocol::{
     consensus::{
         BlockHeight, BranchId, Network,
         Network::{MainNetwork, TestNetwork},
-        NetworkConstants, NetworkType, Parameters,
+        NetworkConstants, NetworkType, Parameters, pow_target_spacing,
     },
     memo::{Memo, MemoBytes},
     value::{ZatBalance, Zatoshis},
@@ -114,6 +114,7 @@ mod migration_plan_cache;
 mod migration_send_max;
 mod tor;
 mod utils;
+#[cfg(feature = "voting")]
 mod voting;
 
 #[cfg(debug_assertions)]
@@ -126,11 +127,14 @@ fn print_debug_state() {
     debug!("Release enabled (congrats, this is NOT a debug build).");
 }
 
-/// The spacing, in blocks, of the durable anchor checkpoints a wallet on a test network retains.
+/// The spacing, in ZIP 318 reference blocks, of the durable anchor checkpoints a wallet on a test
+/// network retains. Like `AnchorRetentionInterval::ZIP_318`, it is scaled by
+/// `zcash_client_backend` to `NU7_POW_TARGET_SPACING_RATIO` times as many blocks from NU7
+/// activation, so it keeps the same duration in time.
 ///
 /// Short enough that a pool migration can be driven end to end in a test session: a migration
-/// transfer may only anchor to a boundary of this grid, so ZIP 318's 144-block spacing would make
-/// each transfer wait hours for a usable anchor. The anonymity-set argument that fixes the grid on
+/// transfer may only anchor to a boundary of this grid, so ZIP 318's 144-reference-block spacing
+/// would make each transfer wait hours for a usable anchor. The anonymity-set argument that fixes the grid on
 /// mainnet — a wallet anchoring off-grid is distinguishable from its peers — does not apply to a
 /// test network.
 const TESTNET_ANCHOR_RETENTION_INTERVAL: NonZeroU32 =
@@ -311,16 +315,25 @@ fn encode_account<'a, P: Parameters>(
     env: &mut JNIEnv<'a>,
     network: &P,
     account: zcash_client_sqlite::wallet::Account,
-) -> jni::errors::Result<JObject<'a>> {
+) -> anyhow::Result<JObject<'a>> {
     let ufvk = match account.ufvk() {
-        Some(ufvk) => env.new_string(ufvk.encode(network))?.into(),
+        Some(ufvk) => env
+            .new_string(
+                ufvk.encode(network)
+                    .map_err(|e| anyhow!("Error encoding account UFVK: {}", e))?,
+            )?
+            .into(),
         None => JObject::null(),
     };
 
     let uivk = match account.ufvk() {
         Some(ufvk) => {
             let uivk = ufvk.to_unified_incoming_viewing_key();
-            env.new_string(uivk.encode(network))?.into()
+            env.new_string(
+                uivk.encode(network)
+                    .map_err(|e| anyhow!("Error encoding account UIVK: {}", e))?,
+            )?
+            .into()
         }
         None => JObject::null(),
     };
@@ -348,7 +361,7 @@ fn encode_account<'a, P: Parameters>(
         None => JValue::Long(-1),
     };
 
-    env.new_object(
+    Ok(env.new_object(
         JNI_ACCOUNT,
         "(Ljava/lang/String;[BJLjava/lang/String;[BLjava/lang/String;Ljava/lang/String;)V",
         &[
@@ -360,7 +373,7 @@ fn encode_account<'a, P: Parameters>(
             (&ufvk).into(),
             (&uivk).into(),
         ],
-    )
+    )?)
 }
 
 /// Fetches the accounts in the given wallet.
@@ -386,11 +399,16 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_getAccoun
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Encode up front: viewing-key encoding can fail, and `rust_vec_to_java`'s element
+        // mapper can only return JNI errors.
+        let accounts = accounts
+            .into_iter()
+            .map(|account| encode_account(env, &network, account))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
         Ok(
-            utils::rust_vec_to_java(env, accounts, JNI_ACCOUNT, |env, account| {
-                encode_account(env, &network, account)
-            })?
-            .into_raw(),
+            utils::rust_vec_to_java(env, accounts, JNI_ACCOUNT, |_, account| Ok(account))?
+                .into_raw(),
         )
     });
     unwrap_exc_or(&mut env, res, ptr::null_mut())
@@ -425,7 +443,7 @@ fn encode_usk<'a>(
     account_uuid: AccountUuid,
     usk: UnifiedSpendingKey,
 ) -> jni::errors::Result<JObject<'a>> {
-    let encoded = SecretVec::new(usk.to_bytes(Era::Orchard));
+    let encoded = usk.to_bytes(Era::Orchard);
     let bytes = env.byte_array_from_slice(encoded.expose_secret())?;
     env.new_object(
         "cash/z/ecc/android/sdk/internal/model/JniAccountUsk",
@@ -2464,6 +2482,8 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_createPro
         let txids = create_proposed_transactions::<_, _, Infallible, _, Infallible, _>(
             &mut db_data,
             &network,
+            &SystemClock,
+            &mut OsRng,
             &prover,
             &prover,
             &wallet::SpendingKeys::from_unified_spending_key(usk),
@@ -2514,6 +2534,8 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_createPcz
             let pczt = create_pczt_from_proposal::<_, _, Infallible, _, Infallible, _>(
                 &mut db_data,
                 &network,
+                &SystemClock,
+                &mut OsRng,
                 account_id,
                 OvkPolicy::Sender,
                 &proposal,
@@ -2643,7 +2665,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_addProofs
             // version: building a proving key is expensive, and this entry point runs on
             // every ordinary shielded send, not only on migrations.
             prover = prover
-                .create_orchard_proof(cached_orchard_proving_key(circuit_version))
+                .create_orchard_proof(OsRng, cached_orchard_proving_key(circuit_version))
                 .map_err(|e| anyhow!("Failed to create Orchard proof for PCZT: {:?}", e))?;
         }
         assert!(!prover.requires_orchard_proof());
@@ -2653,7 +2675,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_addProofs
                 anyhow!("PCZT requires an Ironwood proof but its consensus branch does not support Ironwood")
             })?;
             prover = prover
-                .create_ironwood_proof(cached_orchard_proving_key(circuit_version))
+                .create_ironwood_proof(OsRng, cached_orchard_proving_key(circuit_version))
                 .map_err(|e| anyhow!("Failed to create Ironwood proof for PCZT: {:?}", e))?;
         }
         assert!(!prover.requires_ironwood_proof());
@@ -2664,7 +2686,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_addProofs
             let local_prover = LocalTxProver::new(&spend_params, &output_params);
 
             prover = prover
-                .create_sapling_proofs(&local_prover, &local_prover)
+                .create_sapling_proofs(OsRng, &local_prover, &local_prover)
                 .map_err(|e| anyhow!("Failed to create Sapling proofs for PCZT: {:?}", e))?;
         }
         assert!(!prover.requires_sapling_proofs());
@@ -2721,6 +2743,8 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_extractAn
 
         let txid = extract_and_store_transaction_from_pczt::<_, ()>(
             &mut db_data,
+            &SystemClock,
+            &mut OsRng,
             pczt,
             Some((&spend_vk, &output_vk)),
             Some(&orchard::circuit::VerifyingKey::build(
@@ -2783,7 +2807,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustDerivationTool_de
         let usk = UnifiedSpendingKey::from_seed(&network, seed.expose_secret(), account)
             .map_err(|e| anyhow!("error generating unified spending key from seed: {:?}", e))?;
 
-        let encoded = SecretVec::new(usk.to_bytes(Era::Orchard));
+        let encoded = usk.to_bytes(Era::Orchard);
         Ok(utils::rust_bytes_to_java(env, encoded.expose_secret())?.into_raw())
     });
     unwrap_exc_or(&mut env, res, ptr::null_mut())
@@ -2818,7 +2842,11 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustDerivationTool_de
                     .map_err(|e| {
                         anyhow!("error generating unified spending key from seed: {:?}", e)
                     })
-                    .map(|usk| usk.to_unified_full_viewing_key().encode(&network))
+                    .and_then(|usk| {
+                        usk.to_unified_full_viewing_key()
+                            .encode(&network)
+                            .map_err(|e| anyhow!("error encoding unified full viewing key: {}", e))
+                    })
             })
             .collect::<Result<_, _>>()?;
 
@@ -2912,7 +2940,10 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustDerivationTool_de
         let ufvk = usk.to_unified_full_viewing_key();
 
         let output = env
-            .new_string(ufvk.encode(&network))
+            .new_string(
+                ufvk.encode(&network)
+                    .map_err(|e| anyhow!("Error encoding unified full viewing key: {}", e))?,
+            )
             .expect("Couldn't create Java string!");
 
         Ok(output.into_raw())
@@ -3012,7 +3043,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustDerivationTool_de
             ],
             // For the external subtree, we derive keys from the UFVK's items.
             Some(ufvk_string) => {
-                let (net, ufvk) =
+                let (net, _revision, ufvk) =
                     unified::Ufvk::decode(&ufvk_string).map_err(|e| anyhow!("{e}"))?;
                 let expected_net = network.network_type();
                 if net != expected_net {
@@ -3390,7 +3421,7 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_model_TorClient_getExchan
         let rate = tor_runtime.runtime().block_on(async {
             tor_runtime
                 .client()
-                .get_latest_zec_to_usd_rate(&exchanges)
+                .get_latest_zec_to_usd_rate(&mut OsRng, &exchanges)
                 .await
         })?;
 
@@ -3600,8 +3631,16 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_model_TorWalletClient_che
         let lwd_conn = unsafe { lwd_conn.as_mut() }
             .ok_or_else(|| anyhow!("A Tor lightwalletd connection is required"))?;
 
-        // one day's worth of blocks.
-        let max_exposure_depth = (24 * 60 * 60) / 75;
+        let cur_height = db_data
+            .chain_height()?
+            .ok_or(SqliteClientError::ChainHeightUnknown)?;
+        // The target spacing of the next block: 75 s before NU7 activation, 25 s from it.
+        let block_spacing_secs = pow_target_spacing(&network, cur_height + 1).as_secs();
+
+        // One day's worth of blocks at the current spacing. Across NU7 activation this
+        // overestimates the depth, which only widens the set of addresses checked.
+        let max_exposure_depth = u32::try_from((24 * 60 * 60) / block_spacing_secs)
+            .expect("a day's worth of blocks fits in a u32");
         let addrs =
             db_data.get_ephemeral_transparent_receivers(account_uuid, max_exposure_depth, true)?;
 
@@ -3615,10 +3654,6 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_model_TorWalletClient_che
                     && matches!(meta.exposure(), Exposure::Exposed { .. })
             })
             .min_by_key(|(_, meta)| meta.next_check_time());
-
-        let cur_height = db_data
-            .chain_height()?
-            .ok_or(SqliteClientError::ChainHeightUnknown)?;
 
         let mut found = None;
         if let Some((addr, meta)) = selected_addr_meta {
@@ -3656,9 +3691,9 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_model_TorWalletClient_che
                 // We will schedule the next check to occur after approximately
                 // log2(blocks_since_exposure) additional blocks.
                 let offset_blocks = blocks_since_exposure.log2();
-                // Convert the offset in blocks to an offset in seconds; this will always fit in a
-                // u32.
-                let offset_seconds = (offset_blocks * 75.0).round() as u32;
+                // Convert the offset in blocks to an offset in seconds at the current target
+                // spacing; this will always fit in a u32.
+                let offset_seconds = (offset_blocks * block_spacing_secs as f64).round() as u32;
                 db_data.schedule_next_check(&addr, offset_seconds)?;
             }
         }
@@ -4021,6 +4056,31 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_proposeOr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard: the SDK must ship consensus rules that know NU7. Downgrading the
+    /// librustzcash crates below the NU7 release line makes this fail.
+    #[test]
+    fn nu7_consensus_rules_are_active() {
+        use zcash_primitives::transaction::builder::default_tx_expiry_delta;
+        use zcash_protocol::consensus::{BranchId, Network};
+
+        for (network, nu7_height) in [
+            (Network::MainNetwork, 3_543_405u32),
+            (Network::TestNetwork, 4_465_026u32),
+        ] {
+            assert_eq!(
+                BranchId::for_height(&network, BlockHeight::from_u32(nu7_height - 1)),
+                BranchId::Nu6_3
+            );
+            assert_eq!(
+                BranchId::for_height(&network, BlockHeight::from_u32(nu7_height)),
+                BranchId::Nu7
+            );
+        }
+        assert_eq!(u32::from(BranchId::Nu7), 0x7719_0ad9);
+        assert_eq!(default_tx_expiry_delta(BranchId::Nu6_3), 40);
+        assert_eq!(default_tx_expiry_delta(BranchId::Nu7), 120);
+    }
 
     #[test]
     fn map_import_account_error_tags_checkpoint_parity_failures() {

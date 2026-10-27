@@ -34,6 +34,8 @@ readonly CRATE="zcash_client_backend"
 readonly LOCK="backend-lib/Cargo.lock"
 readonly DEST="backend-lib/src/main/proto/proposal.proto"
 readonly JAVA_PACKAGE="cash.z.wallet.sdk.internal.ffi"
+# crates.io rejects downloads without a User-Agent that identifies the client.
+readonly USER_AGENT="zcash-android-wallet-sdk/update-proposal-proto.sh (https://github.com/zecrocks/zcash-android-wallet-sdk)"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 readonly REPO_ROOT
@@ -58,10 +60,56 @@ read_lock_entry() {
     ' "${LOCK}"
 }
 
+raw_url() {
+    echo "https://raw.githubusercontent.com/${UPSTREAM_REPO}/$1/${UPSTREAM_PATH}"
+}
+
+# Succeeds if UPSTREAM_PATH can be fetched at the given ref.
+ref_exists() {
+    curl -fsI -o /dev/null "$(raw_url "$1")"
+}
+
+# Prints the librustzcash commit a published CRATE release was packaged from,
+# as recorded by `cargo publish` in the crate's .cargo_vcs_info.json. Reads the
+# local Cargo registry cache first and otherwise downloads the .crate from
+# crates.io (which requires a User-Agent).
+crate_vcs_sha() {
+    local version="$1"
+    local cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+    local info="" candidate
+
+    for candidate in "${cargo_home}"/registry/src/*/"${CRATE}-${version}"/.cargo_vcs_info.json; do
+        if [ -f "${candidate}" ]; then
+            info="$(cat "${candidate}")"
+            break
+        fi
+    done
+
+    if [ -z "${info}" ]; then
+        local crate_file
+        crate_file="$(mktemp)"
+        # shellcheck disable=SC2064 # expand the path now, while it is still in scope
+        trap "rm -f '${crate_file}'" RETURN
+        if ! curl -fsSL -A "${USER_AGENT}" -o "${crate_file}" \
+            "https://crates.io/api/v1/crates/${CRATE}/${version}/download"; then
+            echo "error: could not download ${CRATE} ${version} from crates.io." >&2
+            return 1
+        fi
+        info="$(tar -xzOf "${crate_file}" "${CRATE}-${version}/.cargo_vcs_info.json")" || {
+            echo "error: ${CRATE} ${version} has no .cargo_vcs_info.json." >&2
+            return 1
+        }
+    fi
+
+    sed -n 's/.*"sha1"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' <<<"${info}" | head -n 1
+}
+
 # The git ref carrying the proto for the pinned dependency. A crates.io release
-# is tagged `<crate>-<version>`; a git dependency pins an exact revision, which
-# Cargo.lock records as the fragment of the source URL. Resolving the ref from
-# the lockfile rather than from Cargo.toml keeps this correct while the
+# is normally tagged `<crate>-<version>`, but upstream does not always push that
+# tag; when it is missing, the commit recorded in the published crate's
+# .cargo_vcs_info.json is used instead. A git dependency pins an exact revision,
+# which Cargo.lock records as the fragment of the source URL. Resolving the ref
+# from the lockfile rather than from Cargo.toml keeps this correct while the
 # librustzcash git overrides at the bottom of backend-lib/Cargo.toml are in use.
 upstream_ref() {
     local entry version source
@@ -77,7 +125,20 @@ upstream_ref() {
 
     case "${source}" in
         registry+*)
-            echo "${CRATE}-${version}"
+            local tag="${CRATE}-${version}" sha
+            if ref_exists "${tag}"; then
+                echo "${tag}"
+            else
+                sha="$(crate_vcs_sha "${version}")"
+                if [ -z "${sha}" ]; then
+                    echo "error: tag ${tag} is not pushed to ${UPSTREAM_REPO} and the" >&2
+                    echo "       published crate records no commit to fall back to." >&2
+                    exit 1
+                fi
+                echo "note: tag ${tag} is not pushed to ${UPSTREAM_REPO};" >&2
+                echo "      using the commit the crate was published from (${sha})." >&2
+                echo "${sha}"
+            fi
             ;;
         git+*)
             if [ "${source}" = "${source#*#}" ]; then
@@ -96,7 +157,8 @@ upstream_ref() {
 # Writes the derived proto for the given upstream ref to stdout.
 derive() {
     local ref="$1"
-    local url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${ref}/${UPSTREAM_PATH}"
+    local url
+    url="$(raw_url "${ref}")"
     local upstream
     upstream="$(mktemp)"
     # shellcheck disable=SC2064 # expand the path now, while it is still in scope

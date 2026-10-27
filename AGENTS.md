@@ -2,6 +2,22 @@
 
 Guidance for AI coding agents (and anyone else) working in this repository.
 
+## Zec.rocks maintenance and licensing
+
+This repository is the Zec.rocks-maintained MIT continuation of the Zcash Android SDK
+(upstream `zcash/zcash-android-wallet-sdk` is frozen at 4.0.x).
+
+* **Clean room:** never read, copy, or port code from `zodl-inc/*` (AGPL-3.0-only) or
+  `zakura-*` wallet-library forks (unlicensed). Derive changes only from permissively licensed
+  sources: `zcash/librustzcash`, `zcash/orchard`, their CHANGELOGs and docs, and the ZIPs.
+* Every dependency must be permissively licensed; `make deny-rust` (cargo-deny,
+  `backend-lib/deny.toml`) enforces this for the native library.
+* Network upgrades: bump the whole librustzcash crate family together, then follow the
+  checklist in the 5.0.0 entry of `MIGRATIONS.md` (branch IDs, block spacing, expiry,
+  `proposal.proto`, checkpoints).
+* Shielded voting is compiled out until a permissively licensed `zcash_voting` compatible with
+  the current crate line exists; do not enable the `voting` feature.
+
 ## Pre-push validation
 
 Before opening a PR or pushing to an existing PR branch, run the CI checks

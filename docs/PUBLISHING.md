@@ -15,7 +15,7 @@ This document will focus initially on the automated process, with a section at t
 
 # Automated Publishing
 ## Snapshots
-Every push to a branch matching `release/**` triggers an automated [snapshot deployment](https://github.com/zcash/zcash-android-wallet-sdk/actions/workflows/deploy-snapshot.yml).  The workflow can also be dispatched manually against any branch.  Pushes that only touch `docs/**`, `README.md`, `LICENSE`, or the issue/PR templates are ignored.
+Every push to a branch matching `release/**` triggers an automated [snapshot deployment](https://github.com/zecrocks/zcash-android-wallet-sdk/actions/workflows/deploy-snapshot.yml).  The workflow can also be dispatched manually against any branch.  Pushes that only touch `docs/**`, `README.md`, `LICENSE`, or the issue/PR templates are ignored.
 
 Note that snapshots do not have a stable API, so clients should not depend on a snapshot.  The primary reason this is documented is for testing, e.g. before deploying a new production version of the SDK we may test against the snapshot first.
 
@@ -29,7 +29,7 @@ dependencyResolutionManagement {
         maven("https://central.sonatype.com/repository/maven-snapshots/") {
             // Optional; ensures only explicitly declared dependencies come from this repository
             content {
-                includeGroup("cash.z.ecc.android")
+                includeGroup("rocks.zec.android")
             }
         }
     }
@@ -48,12 +48,12 @@ Production releases can be consumed using the instructions in the [README.MD](..
 
 Automated production releases require a manual trigger of the GitHub action and a manual step inside the Sonatype Central Portal.  The release workflow only uploads a deployment; it does not publish it.  To do a production release:
 1. Update the [CHANGELOG](../CHANGELOG.md) for any new changes since the last production release.
-1. Run the [release deployment](https://github.com/zcash/zcash-android-wallet-sdk/actions/workflows/deploy-release.yml).  This is a `workflow_dispatch` workflow, so choose the branch to release from; it publishes whatever `LIBRARY_VERSION` that branch carries in [gradle.properties](../gradle.properties).
+1. Run the [release deployment](https://github.com/zecrocks/zcash-android-wallet-sdk/actions/workflows/deploy-release.yml).  This is a `workflow_dispatch` workflow, so choose the branch to release from; it publishes whatever `LIBRARY_VERSION` that branch carries in [gradle.properties](../gradle.properties).
 1. Log into the [Sonatype Central Portal](https://central.sonatype.com/) and publish the deployment.
     1. Find the new deployment and wait for it to reach the validated state
     1. Check its contents, to verify it looks correct
     1. Publish the deployment
-1. Confirm deployment succeeded by modifying the [Zashi Wallet](https://github.com/Electric-Coin-Company/zashi-android) to consume the new SDK version.
+1. Confirm deployment succeeded by building an app (for example the [demo app](../demo-app) or a downstream wallet) against the published `rocks.zec.android` artifacts at the new version.
 1. Create a new Git tag for the new release in this repository, following the existing `vMAJOR.MINOR.PATCH` convention.  Tags are documentary only; no workflow is triggered by them.
 1. Create a new pull request bumping the version to the next version (this ensures that the next push to a release branch creates a snapshot under the next version number).
 
@@ -62,7 +62,7 @@ See [CI.md](CI.md), which describes the continuous integration workflow for depl
 would need to be configured in a repository fork.
 
 ## One time only
-* Set up environment to [compile the SDK](https://github.com/zcash/zcash-android-wallet-sdk/#compiling-sources)
+* Set up environment to [compile the SDK](https://github.com/zecrocks/zcash-android-wallet-sdk/#compiling-sources)
 * Create file `~/.gradle/gradle.properties`
   * add your sonotype credentials with these properties
       * `mavenCentralUsername`
@@ -71,9 +71,9 @@ would need to be configured in a repository fork.
      * `ZCASH_ASCII_GPG_KEY`
 
 ## Every time
-1. Update the [build number](https://github.com/zcash/zcash-android-wallet-sdk/blob/main/gradle.properties) and the [CHANGELOG](../CHANGELOG.md).  For release builds, suffix the Gradle invocations below with `-PIS_SNAPSHOT=false`.
+1. Update the [build number](https://github.com/zecrocks/zcash-android-wallet-sdk/blob/main/gradle.properties) and the [CHANGELOG](../CHANGELOG.md).  For release builds, suffix the Gradle invocations below with `-PIS_SNAPSHOT=false`.
 1. Build locally
-    * This will install the files in your local maven repo at `~/.m2/repository/cash/z/ecc/android/`
+    * This will install the files in your local maven repo at `~/.m2/repository/rocks/zec/android/`
 ```zsh
 ./gradlew publishToMavenLocal
 ```
@@ -85,12 +85,13 @@ would need to be configured in a repository fork.
         3. Alternatively, `./gradlew publishAndReleaseToMavenCentral -PIS_SNAPSHOT=false` uploads and publishes in one step, skipping the manual review.
 
 ### Artifacts availability 
-- Our existing release artifacts can be found here and here:
-   - https://search.maven.org/artifact/cash.z.ecc.android/zcash-android-sdk
-   - https://repo1.maven.org/maven2/cash/z/ecc/android/
+- Release artifacts are published under the `rocks.zec.android` group:
+   - https://central.sonatype.com/namespace/rocks.zec.android
+   - https://repo1.maven.org/maven2/rocks/zec/android/
+- Releases before 5.0.0 were published by the previous maintainer under `cash.z.ecc.android`.
 
 - And our snapshot artifacts here:
-   - https://central.sonatype.com/repository/maven-snapshots/cash/z/ecc/android/
+   - https://central.sonatype.com/repository/maven-snapshots/rocks/zec/android/
 
 ### Obtain new user token
 1. Log in to the Sonatype Central Portal:

@@ -1,4 +1,4 @@
-# Checks each hop of the maintenance chain (maint/v2.7.x -> maint/v2.8.x -> main)
+# Checks each hop of the maintenance chain (maint/v5.0.x -> main)
 # still merges once a PR lands. One job per hop, so the failing hop is visible
 # from the checks list without opening the run.
 #
@@ -10,7 +10,7 @@
 # counts just as much as one in Kotlin.
 #
 # Run locally with:
-#   ./.github/scripts/check-merge-forward.sh maint/v2.7.x maint/v2.8.x
+#   ./.github/scripts/check-merge-forward.sh maint/v5.0.x main
 #
 # A new release line needs a new job here.
 
@@ -27,34 +27,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  merge_forward_v2_7_into_v2_8:
-    name: maint/v2.7.x into maint/v2.8.x
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        timeout-minutes: 5
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          # Merge bases are needed across branches.
-          fetch-depth: 0
-          # Read-only job, and the `git fetch origin` below works unauthenticated against
-          # this public repository, so the credential is not needed past checkout and
-          # should not be left in .git/config.
-          persist-credentials: false
-      - name: Check hop
-        timeout-minutes: 5
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --quiet --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
-          ./.github/scripts/check-merge-forward.sh \
-            maint/v2.7.x maint/v2.8.x "${BASE_REF}"
-
-  merge_forward_v2_8_into_main:
-    name: maint/v2.8.x into main
+  merge_forward_v5_0_into_main:
+    name: maint/v5.0.x into main
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -74,4 +48,4 @@ jobs:
         run: |
           git fetch --quiet --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
           ./.github/scripts/check-merge-forward.sh \
-            maint/v2.8.x main "${BASE_REF}"
+            maint/v5.0.x main "${BASE_REF}"

@@ -107,7 +107,8 @@ data class NoteSplitProposal(
  * A single scheduled migration transfer.
  *
  * [anchorHeight] is chosen from a shared network-wide 288-block bucket
- * (block height divisible by 288, ≈ 6-hour intervals). This hides the wallet's
+ * (block height divisible by 288: ≈ 6-hour intervals before NU7, ≈ 2-hour intervals after
+ * NU7's 25-second block target). This hides the wallet's
  * last sync time from an observer. The anchor and the broadcast time are independent —
  * the transaction can be broadcast at any point after [nextExecutableAfterHeight].
  *
@@ -907,7 +908,7 @@ interface OrchardMigrationSdk {
      * This is the primary catch-up mechanism — do not rely on notification delivery.
      *
      * [useEstimatedTip] — when true, supplies an estimated current chain tip height computed from
-     * the latest scanned block + elapsed wall-clock time (75 s/block), so a transfer whose
+     * the latest scanned block + elapsed wall-clock time (see [estimatedChainTip]), so a transfer whose
      * `nextExecutableAfterHeight` was crossed after the last sync is correctly detected as overdue
      * even before the next sync updates the tip. Pass `false` to use only the synced tip (-1L),
      * which avoids false positives but may miss transfers that became due since the last sync.
@@ -923,15 +924,18 @@ interface OrchardMigrationSdk {
 
     /**
      * Returns the estimated current chain tip height, computed from the latest scanned block
-     * plus elapsed wall-clock time at a 75-second average block interval. Returns -1 when no
-     * block has been scanned yet.
+     * plus elapsed wall-clock time at the measured block rate ([estimatedSecondsPerBlock]). If the
+     * extrapolation crosses NU7 activation, blocks from activation onward are counted at a third
+     * of the pre-NU7 rate (75 s → 25 s target). Returns -1 when no block has been scanned yet.
      */
     suspend fun estimatedChainTip(): Long
 
     /**
-     * Measured average seconds-per-block over the recently scanned window (clamped; 75s fallback).
-     * Use for every height-to-wall-clock projection — testnet's minimum-difficulty bursts make
-     * the 75s constant a large overestimate there.
+     * Measured average seconds-per-block over the recently scanned window, expressed at the
+     * estimated chain tip (clamped). Falls back to the protocol target — 75 s before NU7, 25 s
+     * from NU7 activation onward — when too few blocks have been scanned. Use for every
+     * height-to-wall-clock projection — testnet's minimum-difficulty bursts make the protocol
+     * target a large overestimate there.
      */
     suspend fun estimatedSecondsPerBlock(): Long
 

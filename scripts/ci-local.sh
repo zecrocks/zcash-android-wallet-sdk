@@ -69,7 +69,9 @@ stage_rust() {
     echo "==> [4/9] rust (test_rust_unit)"
     (
         cd "${REPO_ROOT}/backend-lib"
-        cargo test --all-features
+        # Every feature except `voting`, which does not build yet; mirrors the
+        # Makefile's RUST_CHECK_FEATURES.
+        cargo test --features android-test-fixtures
     )
 }
 

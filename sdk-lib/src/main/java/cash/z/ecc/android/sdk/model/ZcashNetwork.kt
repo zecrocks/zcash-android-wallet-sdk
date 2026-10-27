@@ -15,10 +15,35 @@ data class ZcashNetwork(
 
     fun isTestnet() = id == ID_TESTNET
 
+    /**
+     * The height at which NU7 activates on this network, or `null` if this SDK does not know it
+     * (an unrecognized network id).
+     *
+     * NU7 lowers the target block spacing from 75 to 25 seconds (ZIP 208 / ZIP 218), so any
+     * height-to-time conversion must check which side of this height it is on. These values
+     * mirror `zcash_protocol`'s consensus parameters, which the native library uses for
+     * consensus; the Kotlin copy exists so that time estimates do not need a JNI call.
+     */
+    val nu7ActivationHeight: BlockHeight?
+        get() =
+            when (id) {
+                ID_MAINNET -> NU7_ACTIVATION_HEIGHT_MAINNET
+                ID_TESTNET -> NU7_ACTIVATION_HEIGHT_TESTNET
+                else -> null
+            }
+
+    /**
+     * True if NU7 consensus rules (including its 25-second block target) apply at [height].
+     */
+    fun isNu7ActiveAt(height: BlockHeight): Boolean = nu7ActivationHeight?.let { height >= it } ?: false
+
     @Suppress("MagicNumber")
     companion object {
         const val ID_TESTNET = 0
         const val ID_MAINNET = 1
+
+        private val NU7_ACTIVATION_HEIGHT_MAINNET = BlockHeight(3_543_405)
+        private val NU7_ACTIVATION_HEIGHT_TESTNET = BlockHeight(4_465_026)
 
         // You may notice there are extra checkpoints bundled in the SDK that match the
         // sapling/orchard activation heights.

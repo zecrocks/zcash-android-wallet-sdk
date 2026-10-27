@@ -12,18 +12,7 @@ When forking this repository, some vars/secrets need to be defined to set up new
 The vars/secrets passed to GitHub Actions then map to Gradle properties set up within our build scripts.  Necessary secrets are documented at the top of each GitHub workflow yml file, as well as reiterated here.
 
 ### Pull request
-* Variables
-    * `FIREBASE_TEST_LAB_PROJECT` - Firebase Test Lab project name.
-* Secrets
-    * `EMULATOR_WTF_API_KEY` - API key for [Emulator.wtf](https://emulator.wtf)
-    * `FIREBASE_TEST_LAB_SERVICE_ACCOUNT` - Email address of Firebase Test Lab service account.
-    * `FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER` - Workload identity provider to generate temporary service account key.
-
-The Pull Request workflow supports testing of the app and libraries with both Emulator.wtf and Firebase Test Lab.  By default Emulator.wtf is used for library instrumentation tests, while Firebase Test Lab is used for a robo test.
-
-To configure Firebase Test Lab, you'll need to enable the necessary Google Cloud APIs to enable automated access to Firebase Test Lab.
-* Configure Firebase Test Lab.  Google has [documentation for Jenkins](https://firebase.google.com/docs/test-lab/android/continuous).  Although we're using GitHub Actions, the initial requirements are the same.
-* Configure [workload identity federation](https://github.com/google-github-actions/auth#setting-up-workload-identity-federation)
+No secrets are required. Library instrumentation tests run on a Gradle Managed Device emulator inside the runner. The workflow also runs weekly on `main` (and can be triggered manually) to catch toolchain or runner-image breakage between pull requests.
 
 Note: Pull requests do not currently run darkside tests.  See #361.
 

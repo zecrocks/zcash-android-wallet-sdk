@@ -1,10 +1,3 @@
-# Expected secrets
-# FIREBASE_TEST_LAB_SERVICE_ACCOUNT - Email address of Firebase Test Lab service account
-# FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER - Workload identity provider to generate temporary service account key
-
-# Expected variables
-# FIREBASE_TEST_LAB_PROJECT - Firebase Test Lab project name
-
 name: Pull Request
 
 on:
@@ -14,6 +7,10 @@ on:
       - ".github/PULL_REQUEST_TEMPLATE.md"
       - "README.md"
       - "docs/**"
+  # Weekly run on main catches toolchain/runner-image rot between PRs.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,21 +38,6 @@ jobs:
       - name: Gradle Wrapper Validation
         timeout-minutes: 1
         uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-
-  check_firebase_secrets:
-    runs-on: ubuntu-latest
-    # Reads no repository content — it only reports whether secrets are configured.
-    permissions: {}
-    outputs:
-      has-secrets: ${{ steps.check_firebase_secrets.outputs.defined }}
-    steps:
-      - id: check_firebase_secrets
-        env:
-          FIREBASE_TEST_LAB_PROJECT: ${{ vars.FIREBASE_TEST_LAB_PROJECT }}
-          FIREBASE_TEST_LAB_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_TEST_LAB_SERVICE_ACCOUNT }}
-          FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER }}
-        if: "${{ env.FIREBASE_TEST_LAB_PROJECT != '' && env.FIREBASE_TEST_LAB_SERVICE_ACCOUNT != '' && env.FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER != '' }}"
-        run: echo "defined=true" >> $GITHUB_OUTPUT
 
   check_properties:
     needs: validate_gradle_wrapper
@@ -245,9 +227,11 @@ jobs:
         run: |
           make test-rust
 
-  # --all-features matters: code behind a cargo feature (for example the
+  # The feature list matters: code behind a cargo feature (for example the
   # android-test-fixtures gate the Android build enables) is invisible to a
   # default-feature check, so a merge can break it while `cargo check` stays green.
+  # make lint-rust enables every feature except `voting` (RUST_CHECK_FEATURES in
+  # the Makefile), which does not build until zcash_voting is ported.
   # --tests extends the same coverage to test-only code.
   static_analysis_clippy:
     needs: validate_gradle_wrapper
@@ -409,89 +393,6 @@ jobs:
           name: Test Android modules with Unit Tests
           path: ~/artifacts
 
-  # DISABLED pending a decision with the Android devs -- do not delete yet.
-  #
-  # This job ran the module instrumentation suites on Firebase Test Lab. It had in
-  # fact been dormant for a long time: its condition compared
-  # `check_emulator_wtf_secrets.outputs.has-secrets` against the string 'false',
-  # but with no EMULATOR_WTF_API_KEY configured that output is the empty string, so
-  # the condition was never true and the job skipped on every run. Removing that
-  # dead gate let it run again, whereupon its Build step timed out at 20 minutes
-  # still compiling Rust dependencies (hence the 30 below, matching the sibling
-  # emulator job's budget for the same assemble work).
-  #
-  # The open question is whether it is worth restoring at all:
-  # test_android_modules_emulator now covers the same four modules on an in-runner
-  # Gradle Managed Device, and was added specifically to replace a cloud test
-  # service. Running both means paying Firebase Test Lab and roughly half an hour
-  # of CI for duplicate coverage -- against which FTL does test on real hardware,
-  # which the emulator does not.
-  #
-  # Commented out rather than `if: false` deliberately: a skipped-but-present job
-  # is exactly the state that hid this for so long.
-  #
-  # test_android_modules_ftl:
-  #   if: needs.check_firebase_secrets.outputs.has-secrets == 'true'
-  #   needs: [validate_gradle_wrapper, check_firebase_secrets]
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: read
-  #     id-token: write
-  #   steps:
-  #     - name: Checkout
-  #       timeout-minutes: 1
-  #       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-  #       with:
-  #         # No job here pushes or otherwise re-uses the checkout credential, so keep it
-  #         # out of .git/config where it would be picked up by artifact uploads.
-  #         persist-credentials: false
-  #     - name: Setup
-  #       id: setup
-  #       timeout-minutes: 30
-  #       uses: ./.github/actions/setup
-  #       with:
-  #         rust-cache: true
-  #     - name: Build
-  #       timeout-minutes: 30
-  #       run: |
-  #         ./gradlew assembleDebug assembleAndroidTest
-  #     - name: Authenticate to Google Cloud for Firebase Test Lab
-  #       id: auth_test_lab
-  #       uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
-  #       with:
-  #         create_credentials_file: true
-  #         project_id: ${{ vars.FIREBASE_TEST_LAB_PROJECT }}
-  #         service_account: ${{ secrets.FIREBASE_TEST_LAB_SERVICE_ACCOUNT }}
-  #         workload_identity_provider: ${{ secrets.FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER }}
-  #         access_token_lifetime: "1200s"
-  #     - name: Test
-  #       timeout-minutes: 30
-  #       env:
-  #         # This first environment variable is used by Flank, since the temporary token is missing the project name
-  #         GOOGLE_CLOUD_PROJECT: ${{ vars.FIREBASE_TEST_LAB_PROJECT }}
-  #         ORG_GRADLE_PROJECT_ZCASH_FIREBASE_TEST_LAB_API_KEY_PATH: ${{ steps.auth_test_lab.outputs.credentials_file_path }}
-  #         # Because Fulladle doesn't allow Test Orchestrator to be enabled/disabled for a specific submodule, it must be enabled for all modules
-  #         ORG_GRADLE_PROJECT_IS_USE_TEST_ORCHESTRATOR: true
-  #       run: |
-  #         ./gradlew runFlank --parallel
-  #     - name: Collect Artifacts
-  #       if: ${{ always() }}
-  #       timeout-minutes: 1
-  #       env:
-  #         ARTIFACTS_DIR_PATH: ${{ format('{0}/artifacts', env.home) }}
-  #         TEST_RESULTS_ZIP_PATH: ${{ format('{0}/artifacts/test_results.zip', env.home) }}
-  #       run: |
-  #         mkdir ${ARTIFACTS_DIR_PATH}
-  #
-  #         zip -r ${TEST_RESULTS_ZIP_PATH} . -i build/fladle/\* \*/build/outputs/androidTest-results/\*
-  #     - name: Upload Artifacts
-  #       if: ${{ always() }}
-  #       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-  #       timeout-minutes: 1
-  #       with:
-  #         name: Test Android modules with FTL results
-  #         path: ~/artifacts
-
   # Runs the Android instrumentation suites on a Gradle Managed Device: a
   # hardware-accelerated emulator booted inside the runner. This replaces the
   # former emulator.wtf cloud job and depends on no external test service.
@@ -624,52 +525,3 @@ jobs:
         with:
           name: Demo app release binaries
           path: ~/artifacts
-
-  # Performs a button mash test on the release build of the demo app
-  test_robo_demo_app:
-    # Turning off until the issue of authentication is resolved
-    # TODO [#1326]: Broken authentication with Flank on CI tests
-    # TODO [#1326]: https://github.com/Electric-Coin-Company/zcash-android-wallet-sdk/issues/1326
-    if: false # needs.check_firebase_secrets.outputs.has-secrets == 'true'
-    needs: [demo_app_release_build, check_firebase_secrets]
-    runs-on: ubuntu-latest
-    permissions:
-      packages: read
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        timeout-minutes: 1
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          # No job here pushes or otherwise re-uses the checkout credential, so keep it
-          # out of .git/config where it would be picked up by artifact uploads.
-          persist-credentials: false
-      - name: Setup
-        id: setup
-        timeout-minutes: 30
-        uses: ./.github/actions/setup
-      - name: Authenticate to Google Cloud for Firebase Test Lab
-        id: auth_test_lab
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
-        with:
-          create_credentials_file: true
-          project_id: ${{ vars.FIREBASE_TEST_LAB_PROJECT }}
-          service_account: ${{ secrets.FIREBASE_TEST_LAB_SERVICE_ACCOUNT }}
-          workload_identity_provider: ${{ secrets.FIREBASE_TEST_LAB_WORKLOAD_IDENTITY_PROVIDER }}
-          access_token_lifetime: "900s"
-      - name: Download a single artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: Demo app release binaries
-      - name: Robo test
-        timeout-minutes: 20
-        env:
-          # Path depends on `release_build` job, plus path of `Download a single artifact` step
-          BINARIES_ZIP_PATH: binaries.zip
-          # This first environment variable is used by Flank, since the temporary token is missing the project name
-          GOOGLE_CLOUD_PROJECT: ${{ vars.FIREBASE_TEST_LAB_PROJECT }}
-          ORG_GRADLE_PROJECT_ZCASH_FIREBASE_TEST_LAB_API_KEY_PATH: ${{ steps.auth_test_lab.outputs.credentials_file_path }}
-        run: |
-          unzip ${BINARIES_ZIP_PATH}
-          make test-robo

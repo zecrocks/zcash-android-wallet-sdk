@@ -44,6 +44,13 @@ When reporting issues, please include the following:
 
 This information will help us review and fix your issue faster.
 
+## Licensing of Contributions
+
+This SDK is MIT-licensed. Contributions must be your own work or derived from permissively
+licensed sources. Do not submit code copied, ported, or adapted from AGPL-licensed projects
+(including the `zodl-inc` SDKs and Slipstream) or from unlicensed sources; such pull requests
+will be rejected.
+
 ## Pull Requests
 
 We **love** pull requests!

@@ -69,7 +69,7 @@ fun ZcashNetwork.Companion.fromResources(context: Context) =
 Add the SDK dependency:
 
 ```kotlin
-implementation("cash.z.ecc.android:zcash-android-sdk:$LATEST_VERSION")
+implementation("rocks.zec.android:zcash-android-sdk:$LATEST_VERSION")
 ```
 
 # Using the SDK

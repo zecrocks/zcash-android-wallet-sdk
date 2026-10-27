@@ -267,9 +267,14 @@ install-demo-app: ## Install the demo app on the connected device
 # Rust (backend-lib/)
 # ---------------------------------------------------------------------------
 #
-# The cargo invocations mirror pull-request.yml exactly. --all-features
+# The cargo invocations mirror pull-request.yml exactly. The feature list
 # matters: code behind a cargo feature is not compiled by a default-feature
 # check, so a merge can break it while a plain `cargo check` stays green.
+# RUST_CHECK_FEATURES names every feature except `voting`, which does not
+# build until `zcash_voting` has a release on the current librustzcash line
+# (see backend-lib/Cargo.toml); that is why this is not `--all-features`.
+# Add any new feature here.
+RUST_CHECK_FEATURES := android-test-fixtures
 #
 # Note this repository formats with its own pinned toolchain. Do NOT add
 # `+nightly` to the fmt targets; nightly rustfmt produces different output and
@@ -304,15 +309,15 @@ build-rust-android: ## Build the Rust JNI libs for all Android ABIs
 
 .PHONY: check-rust
 check-rust: ## Type-check the Rust crate without building it
-	cd $(RUST_DIR) && $(CARGO) check --all-targets --all-features
+	cd $(RUST_DIR) && $(CARGO) check --all-targets --features $(RUST_CHECK_FEATURES)
 
 .PHONY: test-rust
 test-rust: ## Run the Rust unit tests
-	cd $(RUST_DIR) && $(CARGO) test --all-features
+	cd $(RUST_DIR) && $(CARGO) test --features $(RUST_CHECK_FEATURES)
 
 .PHONY: lint-rust
 lint-rust: ## Lint the Rust crate with clippy
-	cd $(RUST_DIR) && $(CARGO) clippy --tests --all-features -- \
+	cd $(RUST_DIR) && $(CARGO) clippy --tests --features $(RUST_CHECK_FEATURES) -- \
 		-W clippy::all -D warnings
 
 .PHONY: format-rust

@@ -1,4 +1,12 @@
 //! JNI bindings for the zcash_voting crate.
+//!
+//! Compiled only with the `voting` Cargo feature, which is disabled: see the `zcash_voting`
+//! dependency comment in `backend-lib/Cargo.toml`.
+
+compile_error!(
+    "the `voting` feature is disabled: `zcash_voting` has no release on the current librustzcash \
+     line. Re-add the dependency and port this module first (see backend-lib/Cargo.toml)."
+);
 
 use anyhow::anyhow;
 use jni::{

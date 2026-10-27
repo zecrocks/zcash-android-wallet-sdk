@@ -745,20 +745,6 @@ class SdkSynchronizer private constructor(
             }
         }
 
-    /**
-     * Made public only for snapshot release. Will be fixed properly in real one.
-     */
-    override suspend fun getWalletDbPathForVoting(): String =
-        withContext(Dispatchers.IO) {
-            val dataDbFile =
-                DatabaseCoordinator.getInstance(context).dataDbFile(
-                    network = synchronizerKey.zcashNetwork,
-                    alias = synchronizerKey.alias
-                )
-
-            dataDbFile.absolutePath
-        }
-
     suspend fun isValidAddress(address: String): Boolean = !validateAddress(address).isNotValid
 
     //
