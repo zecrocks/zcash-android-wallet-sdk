@@ -4057,6 +4057,31 @@ pub extern "C" fn Java_cash_z_ecc_android_sdk_internal_jni_RustBackend_proposeOr
 mod tests {
     use super::*;
 
+    /// Regression guard: the SDK must ship consensus rules that know NU7. Downgrading the
+    /// librustzcash crates below the NU7 release line makes this fail.
+    #[test]
+    fn nu7_consensus_rules_are_active() {
+        use zcash_primitives::transaction::builder::default_tx_expiry_delta;
+        use zcash_protocol::consensus::{BranchId, Network};
+
+        for (network, nu7_height) in [
+            (Network::MainNetwork, 3_543_405u32),
+            (Network::TestNetwork, 4_465_026u32),
+        ] {
+            assert_eq!(
+                BranchId::for_height(&network, BlockHeight::from_u32(nu7_height - 1)),
+                BranchId::Nu6_3
+            );
+            assert_eq!(
+                BranchId::for_height(&network, BlockHeight::from_u32(nu7_height)),
+                BranchId::Nu7
+            );
+        }
+        assert_eq!(u32::from(BranchId::Nu7), 0x7719_0ad9);
+        assert_eq!(default_tx_expiry_delta(BranchId::Nu6_3), 40);
+        assert_eq!(default_tx_expiry_delta(BranchId::Nu7), 120);
+    }
+
     #[test]
     fn map_import_account_error_tags_checkpoint_parity_failures() {
         for msg in [
